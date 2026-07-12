@@ -1,8 +1,16 @@
 scratch/
 __pycache__/
 *.pyc
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.db
+*.db-shm
+*.db-wal
 .env
 .prod.env
 .dev.env
 .DS_Store
 DS_Store/
+spec.md

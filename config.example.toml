@@ -1,0 +1,35 @@
+timezone = "Africa/Johannesburg"
+manual_on_max_seconds = 3600
+
+[[channels]]
+id = "relay-1"
+bcm_pin = 17
+active_high = true
+
+[[channels]]
+id = "relay-2"
+bcm_pin = 27
+active_high = true
+
+[[channels]]
+id = "relay-3"
+bcm_pin = 22
+active_high = true
+
+[[devices]]
+id = "sunlite-a"
+name = "Sunlite 11002 - A"
+profile = "maintained_output"
+channels = ["relay-1"]
+
+[[devices]]
+id = "sunlite-b"
+name = "Sunlite 11002 - B"
+profile = "maintained_output"
+channels = ["relay-2"]
+
+[[devices]]
+id = "sunlite-c"
+name = "Sunlite 11002 - C"
+profile = "maintained_output"
+channels = ["relay-3"]
