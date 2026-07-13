@@ -99,8 +99,21 @@ def test_repository_round_trip(tmp_path: Path) -> None:
     repository.save_global_stop(True, NOW)
     repository.record_command(CommandRecord("cmd-1", "stop_all", NOW, "operator@example.com"))
     repository.record_audit(AuditEvent(NOW, "operator@example.com", "stop_all"))
-    repository.save_run(RunRecord("run-1", schedule.id, "sunlite-a", NOW))
+    repository.save_run(
+        RunRecord("run-1", schedule.id, "sunlite-a", NOW, actual_start=NOW, outcome="running")
+    )
+    repository.save_run(
+        RunRecord(
+            "run-1",
+            schedule.id,
+            "sunlite-a",
+            NOW,
+            actual_end=NOW + timedelta(minutes=1),
+            outcome="completed",
+        )
+    )
 
     assert repository.load_runtime("sunlite-a") == runtime
     assert repository.load_global_stop() is True
     assert repository.record_counts() == {"commands": 1, "audit_events": 1, "runs": 1}
+    assert repository.list_runs()[0].actual_start == NOW

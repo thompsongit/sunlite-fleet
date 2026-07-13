@@ -166,7 +166,7 @@ def recovery_action(schedule: Schedule, now: datetime) -> RecoveryAction:
     validate_schedule(schedule)
     require_aware(now, "now")
     now = now.astimezone(UTC)
-    if now < schedule.starts_at.astimezone(UTC):
+    if now <= schedule.starts_at.astimezone(UTC):
         return RecoveryAction.FUTURE
     if now >= schedule_end(schedule):
         return RecoveryAction.COMPLETE

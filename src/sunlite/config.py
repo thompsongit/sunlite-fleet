@@ -54,6 +54,9 @@ class DeviceConfig:
 class AppConfig:
     timezone: str
     manual_on_max_seconds: int
+    database_path: str
+    controller_socket: str
+    pulse_seconds: float
     channels: tuple[RelayChannelConfig, ...]
     devices: tuple[DeviceConfig, ...]
 
@@ -64,6 +67,10 @@ class AppConfig:
             raise ValueError(f"unknown timezone: {self.timezone}") from error
         if self.manual_on_max_seconds <= 0:
             raise ValueError("manual_on_max_seconds must be positive")
+        if not self.database_path or not self.controller_socket:
+            raise ValueError("database_path and controller_socket are required")
+        if not 0.02 <= self.pulse_seconds <= 5:
+            raise ValueError("pulse_seconds must be between 0.02 and 5 seconds")
         _unique((channel.id for channel in self.channels), "channel id")
         _unique((channel.bcm_pin for channel in self.channels), "BCM pin")
         _unique((device.id for device in self.devices), "device id")
@@ -110,6 +117,9 @@ def config_from_dict(raw: dict[str, Any]) -> AppConfig:
     return AppConfig(
         timezone=str(raw.get("timezone", "UTC")),
         manual_on_max_seconds=int(raw.get("manual_on_max_seconds", 3600)),
+        database_path=str(raw.get("database_path", "sunlite.db")),
+        controller_socket=str(raw.get("controller_socket", "/tmp/sunlite-controller.sock")),
+        pulse_seconds=float(raw.get("pulse_seconds", 0.25)),
         channels=channels,
         devices=devices,
     )

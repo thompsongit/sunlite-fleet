@@ -8,10 +8,20 @@ version = "0.1.0"
 description = "Multi-device solar simulator scheduler"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+  "fastapi>=0.115,<1",
+  "gpiozero>=2,<3",
+  "jinja2>=3.1,<4",
+  "uvicorn>=0.34,<1",
+]
+
+[project.scripts]
+sunlite-controller = "sunlite.controller:main"
+sunlite-web = "sunlite.web:main"
 
 [dependency-groups]
 dev = [
+  "httpx>=0.28,<1",
   "mypy>=1.15,<2",
   "pytest>=8.3,<9",
   "ruff>=0.11,<1",
@@ -19,6 +29,9 @@ dev = [
 
 [tool.pytest.ini_options]
 addopts = "-q"
+filterwarnings = [
+  "ignore:Using `httpx` with `starlette.testclient` is deprecated.*",
+]
 testpaths = ["tests"]
 
 [tool.ruff]

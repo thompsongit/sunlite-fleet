@@ -12,6 +12,8 @@ class RelayDriver(Protocol):
 
     def state(self, device_id: str) -> CommandedState: ...
 
+    def close(self) -> None: ...
+
 
 class MockRelay:
     def __init__(self, device_ids: tuple[str, ...]) -> None:
@@ -25,6 +27,9 @@ class MockRelay:
 
     def state(self, device_id: str) -> CommandedState:
         return self._states[device_id]
+
+    def close(self) -> None:
+        self._states = dict.fromkeys(self._states, CommandedState.OFF)
 
 
 @dataclass(frozen=True, slots=True)

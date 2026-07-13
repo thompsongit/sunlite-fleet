@@ -114,6 +114,7 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (2, "ALTER TABLE schedules ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;"),
 )
 
 
@@ -206,14 +207,14 @@ class Repository:
             connection.execute(
                 """INSERT INTO schedules
                    (id, device_id, name, kind, starts_at_utc, timezone, recovery_policy,
-                    enabled, on_seconds, off_seconds, repeat_count, ends_at_utc)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   enabled, on_seconds, off_seconds, repeat_count, ends_at_utc, archived)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                    ON CONFLICT(id) DO UPDATE SET device_id=excluded.device_id, name=excluded.name,
                    kind=excluded.kind, starts_at_utc=excluded.starts_at_utc,
                    timezone=excluded.timezone, recovery_policy=excluded.recovery_policy,
                    enabled=excluded.enabled, on_seconds=excluded.on_seconds,
                    off_seconds=excluded.off_seconds, repeat_count=excluded.repeat_count,
-                   ends_at_utc=excluded.ends_at_utc""",
+                   ends_at_utc=excluded.ends_at_utc, archived=0""",
                 (
                     schedule.id,
                     schedule.device_id,
@@ -243,14 +244,34 @@ class Repository:
     def get_schedule(self, schedule_id: str) -> Schedule | None:
         with self.connect() as connection:
             row = connection.execute(
-                "SELECT * FROM schedules WHERE id = ?", (schedule_id,)
+                "SELECT * FROM schedules WHERE id = ? AND archived = 0", (schedule_id,)
             ).fetchone()
             return self._schedule_from_row(connection, row) if row else None
 
     def list_schedules(self) -> tuple[Schedule, ...]:
         with self.connect() as connection:
-            rows = connection.execute("SELECT * FROM schedules ORDER BY starts_at_utc, id")
+            rows = connection.execute(
+                "SELECT * FROM schedules WHERE archived = 0 ORDER BY starts_at_utc, id"
+            )
             return tuple(self._schedule_from_row(connection, row) for row in rows)
+
+    def set_schedule_enabled(self, schedule_id: str, enabled: bool) -> None:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "UPDATE schedules SET enabled = ? WHERE id = ? AND archived = 0",
+                (enabled, schedule_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(f"unknown schedule: {schedule_id}")
+
+    def archive_schedule(self, schedule_id: str) -> None:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "UPDATE schedules SET archived = 1, enabled = 0 WHERE id = ? AND archived = 0",
+                (schedule_id,),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(f"unknown schedule: {schedule_id}")
 
     def save_runtime(self, runtime: DeviceRuntime) -> None:
         manual = runtime.manual_override
@@ -366,7 +387,8 @@ class Repository:
                    (id, schedule_id, device_id, planned_start_utc,
                     actual_start_utc, actual_end_utc, outcome)
                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(id) DO UPDATE SET actual_start_utc=excluded.actual_start_utc,
+                   ON CONFLICT(id) DO UPDATE SET
+                   actual_start_utc=COALESCE(excluded.actual_start_utc, runs.actual_start_utc),
                    actual_end_utc=excluded.actual_end_utc, outcome=excluded.outcome""",
                 (
                     run.id,
@@ -385,6 +407,48 @@ class Repository:
                 table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
                 for table in ("commands", "audit_events", "runs")
             }
+
+    def list_audit(self, limit: int = 100) -> tuple[AuditEvent, ...]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM audit_events ORDER BY id DESC LIMIT ?", (limit,)
+            )
+            return tuple(
+                AuditEvent(
+                    at=_load_datetime(row["at_utc"]),
+                    actor=str(row["actor"]),
+                    action=str(row["action"]),
+                    device_id=str(row["device_id"]) if row["device_id"] else None,
+                    details=str(row["details"]),
+                )
+                for row in rows
+            )
+
+    def list_runs(self, limit: int = 100) -> tuple[RunRecord, ...]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM runs ORDER BY planned_start_utc DESC LIMIT ?", (limit,)
+            )
+            return tuple(
+                RunRecord(
+                    id=str(row["id"]),
+                    schedule_id=str(row["schedule_id"]),
+                    device_id=str(row["device_id"]),
+                    planned_start=_load_datetime(row["planned_start_utc"]),
+                    actual_start=(
+                        _load_datetime(row["actual_start_utc"])
+                        if row["actual_start_utc"]
+                        else None
+                    ),
+                    actual_end=(
+                        _load_datetime(row["actual_end_utc"])
+                        if row["actual_end_utc"]
+                        else None
+                    ),
+                    outcome=str(row["outcome"]),
+                )
+                for row in rows
+            )
 
     @staticmethod
     def _schedule_from_row(connection: sqlite3.Connection, row: sqlite3.Row) -> Schedule:

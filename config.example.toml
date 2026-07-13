@@ -1,5 +1,8 @@
 timezone = "Africa/Johannesburg"
 manual_on_max_seconds = 3600
+database_path = "sunlite.db"
+controller_socket = "/tmp/sunlite-controller.sock"
+pulse_seconds = 0.25
 
 [[channels]]
 id = "relay-1"

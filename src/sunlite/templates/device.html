@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ device.name }} · Sunlite Scheduler{% endblock %}
+{% block content %}
+<a class="back-link" href="/">← All simulators</a>
+<section class="hero device-hero" data-device-id="{{ device.id }}">
+  <div>
+    <p class="eyebrow">Solar simulator control</p>
+    <h1>{{ device.name }}</h1>
+    <p class="lede">Commanded state and controls for this simulator.</p>
+  </div>
+  <div class="commanded-panel">
+    <span class="eyebrow">Commanded state</span>
+    <strong class="state-{{ device.commanded_state }}" data-field="state">{{ device.commanded_state|upper }}</strong>
+  </div>
+</section>
+
+<section class="detail-panel">
+  <div class="metric"><span>Mode</span><strong data-field="mode">{{ device.mode|replace('_', ' ')|title }}</strong></div>
+  <div class="metric"><span>Active run</span><strong data-field="active">{{ device.active_schedule_name or 'None' }}</strong></div>
+  <div class="metric"><span>Next transition</span><strong data-field="next">{% if device.next_transition %}{{ device.next_transition.state|upper }} · {{ device.next_transition.at }}{% else %}Not scheduled{% endif %}</strong></div>
+  <div class="metric"><span>Controller</span><strong>{% if status.healthy %}Healthy{% else %}Offline{% endif %}</strong></div>
+</section>
+
+<section class="control-panel">
+  <div><p class="eyebrow">Device controls</p><h2>Override operation</h2><p>Stop cancels the active run. Pause retains it for an explicit resume.</p></div>
+  <div class="button-row wrap">
+    <button class="button danger" data-command="stop" data-device="{{ device.id }}">Stop</button>
+    <button class="button outline" data-command="pause" data-device="{{ device.id }}">Pause</button>
+    <button class="button outline" data-command="resume" data-device="{{ device.id }}">Resume</button>
+    <button class="button outline" data-open-manual="off">Manual off</button>
+    <button class="button primary" data-open-manual="on">Manual on</button>
+  </div>
+</section>
+
+<section class="section-heading"><div><p class="eyebrow">Recent state</p><h2>Timeline</h2></div><a class="text-link" href="/schedules/new?device={{ device.id }}">Schedule this device →</a></section>
+<div class="timeline-placeholder"><span>Live run transitions will appear here</span></div>
+
+<dialog id="manual-dialog" class="modal">
+  <form method="dialog" id="manual-form" data-device="{{ device.id }}">
+    <header><div><p class="eyebrow">Temporary override</p><h2>Manual <span id="manual-state-label">ON</span></h2></div><button value="cancel" class="icon-button" aria-label="Close">×</button></header>
+    <input type="hidden" id="manual-state" value="on">
+    <label>Duration <span>minutes</span><input id="manual-duration" type="number" min="1" max="60" value="15" required></label>
+    <label>Reason <textarea id="manual-reason" rows="3" placeholder="Reason for this override" required></textarea></label>
+    <footer><button value="cancel" class="button outline">Cancel</button><button value="default" class="button primary" id="manual-submit">Apply override</button></footer>
+  </form>
+</dialog>
+{% endblock %}

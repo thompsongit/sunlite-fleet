@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Schedules · Sunlite Scheduler{% endblock %}
+{% block content %}
+<section class="page-heading">
+  <div><p class="eyebrow">Automation</p><h1>Schedules</h1><p class="lede">Recurring cycles and one-off custom timelines for each simulator.</p></div>
+  <a class="button primary" href="/schedules/new">New schedule</a>
+</section>
+
+<section class="schedule-list">
+  {% for schedule in schedules %}
+  <article class="schedule-row" data-schedule-id="{{ schedule.id }}">
+    <div class="schedule-icon">{% if schedule.kind == 'regular' %}↻{% else %}⌁{% endif %}</div>
+    <div><p class="eyebrow">{{ schedule.kind }} · {{ schedule.device_id }}</p><h3>{{ schedule.name }}</h3><p>Starts {{ schedule.starts_at }} · {{ schedule.timezone }}</p></div>
+    <span class="status-pill {% if schedule.enabled %}enabled{% endif %}">{% if schedule.enabled %}Enabled{% else %}Disabled{% endif %}</span>
+    <div class="row-actions"><a class="button text" href="/schedules/{{ schedule.id }}/edit">Edit</a><button class="button text danger-text" data-delete-schedule="{{ schedule.id }}">Delete</button></div>
+  </article>
+  {% else %}
+  <div class="empty-state"><h3>No schedules yet</h3><p>Create a regular cycle or custom experiment timeline.</p><a class="text-link" href="/schedules/new">Create the first schedule →</a></div>
+  {% endfor %}
+</section>
+{% endblock %}

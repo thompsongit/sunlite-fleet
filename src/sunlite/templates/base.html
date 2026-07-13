@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#faf7f7">
+  <title>{% block title %}Sunlite Scheduler{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+  <script defer src="{{ url_for('static', path='app.js') }}"></script>
+</head>
+<body data-page="{{ page }}">
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="Sunlite Scheduler dashboard">
+      <span class="brand-mark" aria-hidden="true">☼</span>
+      <span>Sunlite Scheduler</span>
+    </a>
+    <nav aria-label="Primary navigation">
+      <a href="/" {% if page == 'dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
+      <a href="/schedules" {% if page == 'schedules' %}aria-current="page"{% endif %}>Schedules</a>
+      <a href="/history" {% if page == 'history' %}aria-current="page"{% endif %}>History</a>
+      <a href="/system" {% if page == 'system' %}aria-current="page"{% endif %}>System</a>
+    </nav>
+  </header>
+
+  {% if not status.healthy %}
+  <div class="offline-banner" role="alert">Controller unavailable — controls and live state are offline.</div>
+  {% endif %}
+
+  <main>{% block content %}{% endblock %}</main>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

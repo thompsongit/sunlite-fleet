@@ -149,7 +149,13 @@ class FleetArbiter:
         active_schedule_id: str | None = None,
     ) -> None:
         require_aware(now, "now")
+        changed = (
+            runtime.mode is not mode
+            or runtime.commanded_state is not state
+            or runtime.active_schedule_id != active_schedule_id
+        )
         runtime.mode = mode
         runtime.commanded_state = state
         runtime.active_schedule_id = active_schedule_id
-        runtime.updated_at = now
+        if changed:
+            runtime.updated_at = now
