@@ -19,15 +19,19 @@
     <span class="eyebrow">Safety control</span>
     <p>Stop All cancels active runs and latches every configured output OFF.</p>
   </div>
+  {% if request.state.identity.can_operate %}
   <div class="button-row">
     <button class="button danger" data-command="stop-all">Stop all</button>
     <button class="button outline" data-command="resume-all">Resume automation</button>
   </div>
+  {% else %}
+  <span class="status-pill">View-only access</span>
+  {% endif %}
 </section>
 
 <section class="section-heading">
   <div><p class="eyebrow">Configured devices</p><h2>Simulator status</h2></div>
-  <a class="text-link" href="/schedules/new">Create schedule <span>→</span></a>
+  {% if request.state.identity.can_operate %}<a class="text-link" href="/schedules/new">Create schedule <span>→</span></a>{% endif %}
 </section>
 
 <section class="device-grid" id="device-grid">

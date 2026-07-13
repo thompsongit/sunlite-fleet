@@ -10,12 +10,22 @@ from typing import Annotated, Any
 
 import uvicorn
 from fastapi import Body, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 
 from .codec import JsonObject
 from .ipc import ControllerClient, ControllerGateway
+from .security import (
+    AuthenticationError,
+    Identity,
+    SecurityManager,
+    SecuritySettings,
+    TokenVerifier,
+)
 
 _ROOT = Path(__file__).parent
 _TEMPLATES = Jinja2Templates(directory=_ROOT / "templates")
@@ -30,12 +40,60 @@ _COMMANDS = {
 }
 
 
-def create_app(gateway: ControllerGateway | None = None) -> FastAPI:
+def create_app(
+    gateway: ControllerGateway | None = None,
+    security_settings: SecuritySettings | None = None,
+    token_verifier: TokenVerifier | None = None,
+) -> FastAPI:
     app = FastAPI(title="Sunlite Scheduler", docs_url=None, redoc_url=None)
     app.state.gateway = gateway or ControllerClient(
         os.getenv("SUNLITE_CONTROLLER_SOCKET", "/tmp/sunlite-controller.sock")
     )
+    security = SecurityManager(security_settings or SecuritySettings.from_env(), token_verifier)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(security.settings.allowed_hosts))
     app.mount("/static", StaticFiles(directory=_ROOT / "static"), name="static")
+
+    @app.middleware("http")
+    async def secure_request(
+        request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        public = request.url.path == "/health" or request.url.path.startswith(
+            ("/static/", "/favicon.ico")
+        )
+        cookie_value: str | None = None
+        if not public:
+            try:
+                identity = await security.authenticate(request)
+            except AuthenticationError as error:
+                error_response = JSONResponse(
+                    {"detail": str(error)},
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Cloudflare-Access"},
+                )
+                security.apply_headers(error_response, request.url.path)
+                return error_response
+            session_id, value, is_new = security.session(request)
+            cookie_value = value if is_new else None
+            request.state.identity = identity
+            request.state.csrf_token = security.csrf_token(session_id)
+            if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+                if not identity.can_operate:
+                    forbidden_response = JSONResponse(
+                        {"detail": "Operator role required"}, status_code=403
+                    )
+                    security.apply_headers(forbidden_response, request.url.path)
+                    return forbidden_response
+                if not security.valid_csrf(request, session_id):
+                    csrf_response = JSONResponse(
+                        {"detail": "Invalid CSRF token"}, status_code=403
+                    )
+                    security.apply_headers(csrf_response, request.url.path)
+                    return csrf_response
+        response = await call_next(request)
+        if cookie_value:
+            security.set_session_cookie(response, cookie_value)
+        security.apply_headers(response, request.url.path)
+        return response
 
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request) -> HTMLResponse:
@@ -71,6 +129,7 @@ def create_app(gateway: ControllerGateway | None = None) -> FastAPI:
     @app.get("/schedules/new", response_class=HTMLResponse)
     @app.get("/schedules/{schedule_id}/edit", response_class=HTMLResponse)
     async def schedule_editor(request: Request, schedule_id: str | None = None) -> HTMLResponse:
+        _require_operator(request)
         status = await _safe_request(app, {"action": "status"}, _offline_status())
         schedule = None
         if schedule_id:
@@ -123,9 +182,13 @@ def create_app(gateway: ControllerGateway | None = None) -> FastAPI:
         return await _request(app, {"action": "schedules.get", "id": schedule_id})
 
     @app.post("/api/schedules")
-    async def save_schedule(payload: Annotated[JsonObject, Body()]) -> Any:
+    async def save_schedule(request: Request, payload: Annotated[JsonObject, Body()]) -> Any:
         return await _request(
-            app, {"action": "schedules.save", "schedule": payload, "actor": "web"}
+            app,
+            _mutation(
+                request,
+                {"action": "schedules.save", "schedule": payload},
+            ),
         )
 
     @app.post("/api/schedules/preview")
@@ -133,19 +196,24 @@ def create_app(gateway: ControllerGateway | None = None) -> FastAPI:
         return await _request(app, {"action": "schedules.preview", "schedule": payload})
 
     @app.delete("/api/schedules/{schedule_id}")
-    async def delete_schedule(schedule_id: str) -> Any:
+    async def delete_schedule(request: Request, schedule_id: str) -> Any:
         return await _request(
-            app, {"action": "schedules.delete", "id": schedule_id, "actor": "web"}
+            app,
+            _mutation(request, {"action": "schedules.delete", "id": schedule_id}),
         )
 
     @app.post("/api/commands/{command}")
     async def command(
-        command: str, payload: Annotated[JsonObject | None, Body()] = None
+        request: Request,
+        command: str,
+        payload: Annotated[JsonObject | None, Body()] = None,
     ) -> Any:
         action = _COMMANDS.get(command)
         if action is None:
             raise HTTPException(404, "Unknown command")
-        return await _request(app, {"action": action, "actor": "web", **(payload or {})})
+        return await _request(
+            app, _mutation(request, {"action": action, **(payload or {})})
+        )
 
     @app.get("/api/events")
     async def events(request: Request) -> StreamingResponse:
@@ -196,6 +264,29 @@ def _offline_status() -> JsonObject:
         "global_stop_latched": False,
         "timezone": "Africa/Johannesburg",
         "devices": [],
+    }
+
+
+def _identity(request: Request) -> Identity:
+    identity = getattr(request.state, "identity", None)
+    if not isinstance(identity, Identity):
+        raise HTTPException(401, "Authentication required")
+    return identity
+
+
+def _require_operator(request: Request) -> None:
+    if not _identity(request).can_operate:
+        raise HTTPException(403, "Operator role required")
+
+
+def _mutation(request: Request, payload: JsonObject) -> JsonObject:
+    key = request.headers.get("Idempotency-Key", "").strip()
+    if not 16 <= len(key) <= 128:
+        raise HTTPException(400, "Idempotency-Key must contain 16 to 128 characters")
+    return {
+        **payload,
+        "actor": _identity(request).email,
+        "idempotency_key": key,
     }
 
 

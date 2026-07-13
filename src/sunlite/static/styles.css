@@ -52,7 +52,7 @@ h1, h2, h3 { color: var(--ink); font-weight: 300; line-height: 1.15; }
 h1 { margin-bottom: 20px; font-size: clamp(44px, 6vw, 72px); letter-spacing: -.035em; }
 h2 { margin-bottom: 12px; font-size: 36px; letter-spacing: -.025em; }
 h3 { margin-bottom: 8px; font-size: 22px; }
-.eyebrow { margin-bottom: 14px; color: var(--violet); font: 600 12px/1.4 Raleway, "Open Sans", Arial, sans-serif; letter-spacing: .15em; text-transform: uppercase; }
+.eyebrow { margin-bottom: 14px; color: var(--violet); font: 600 12px/1.4 Raleway, "Open Sans", Arial, sans-serif; text-transform: uppercase; }
 .lede { max-width: 650px; margin-bottom: 0; color: var(--muted); font-size: 17px; }
 
 .hero { min-height: 300px; display: flex; align-items: center; justify-content: space-between; gap: 60px; }

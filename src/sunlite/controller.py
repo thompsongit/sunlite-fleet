@@ -185,7 +185,12 @@ class ControllerService:
         if action == "system":
             return self._system_status()
 
-        self._record_command(action, request, actor, now)
+        command_id = str(request.get("idempotency_key") or uuid4())
+        previous_action = self.repository.command_action(command_id)
+        if previous_action:
+            if previous_action != action:
+                raise ValueError("idempotency key was already used for another action")
+            return self.reconcile(now)
         if action == "schedules.save":
             schedule = schedule_from_dict(_object(request, "schedule"))
             others = tuple(
@@ -223,6 +228,7 @@ class ControllerService:
         else:
             raise ValueError(f"unknown action: {action}")
 
+        self._record_command(command_id, action, request, actor, now)
         self.repository.record_audit(
             AuditEvent(now, actor, action, str(request.get("device_id") or "") or None)
         )
@@ -410,11 +416,16 @@ class ControllerService:
         }
 
     def _record_command(
-        self, action: str, request: JsonObject, actor: str, now: datetime
+        self,
+        command_id: str,
+        action: str,
+        request: JsonObject,
+        actor: str,
+        now: datetime,
     ) -> None:
         self.repository.record_command(
             CommandRecord(
-                str(uuid4()),
+                command_id,
                 action,
                 now,
                 actor,

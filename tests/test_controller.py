@@ -50,10 +50,18 @@ def test_controller_reconciles_devices_and_latched_stop(tmp_path: Path) -> None:
     assert devices["sunlite-b"]["commanded_state"] == "off"
     assert controller.next_boundary() == schedule.starts_at + timedelta(minutes=10)
 
-    controller.handle({"action": "stop_all", "actor": "operator"})
+    stop = {
+        "action": "stop_all",
+        "actor": "operator",
+        "idempotency_key": "controller-test-stop-0001",
+    }
+    controller.handle(stop)
+    controller.handle(stop)
     assert relay.state("sunlite-a") is CommandedState.OFF
     assert repository.load_global_stop() is True
-    assert repository.get_schedule(schedule.id).enabled is False
+    saved = repository.get_schedule(schedule.id)
+    assert saved is not None and saved.enabled is False
+    assert repository.record_counts()["commands"] == 2
 
 
 def test_recovery_and_unix_socket_round_trip(tmp_path: Path) -> None:
@@ -72,7 +80,8 @@ def test_recovery_and_unix_socket_round_trip(tmp_path: Path) -> None:
         relay = RecordingRelay(tuple(device.id for device in config.devices))
         controller = ControllerService(config, repository, relay, FakeClock(NOW))
         controller.initialize()
-        assert repository.get_schedule("abort-a").enabled is False
+        aborted = repository.get_schedule("abort-a")
+        assert aborted is not None and aborted.enabled is False
         assert relay.state("sunlite-b") is CommandedState.ON
 
         socket = Path.cwd() / f".sunlite-{uuid4().hex[:8]}.sock"

@@ -366,6 +366,13 @@ class Repository:
                 ),
             )
 
+    def command_action(self, command_id: str) -> str | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT action FROM commands WHERE id = ?", (command_id,)
+            ).fetchone()
+            return str(row["action"]) if row else None
+
     def record_audit(self, event: AuditEvent) -> None:
         with self.connect() as connection:
             connection.execute(

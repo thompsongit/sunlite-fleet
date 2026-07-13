@@ -23,6 +23,7 @@
 
 <section class="control-panel">
   <div><p class="eyebrow">Device controls</p><h2>Override operation</h2><p>Stop cancels the active run. Pause retains it for an explicit resume.</p></div>
+  {% if request.state.identity.can_operate %}
   <div class="button-row wrap">
     <button class="button danger" data-command="stop" data-device="{{ device.id }}">Stop</button>
     <button class="button outline" data-command="pause" data-device="{{ device.id }}">Pause</button>
@@ -30,11 +31,15 @@
     <button class="button outline" data-open-manual="off">Manual off</button>
     <button class="button primary" data-open-manual="on">Manual on</button>
   </div>
+  {% else %}
+  <span class="status-pill">View-only access</span>
+  {% endif %}
 </section>
 
-<section class="section-heading"><div><p class="eyebrow">Recent state</p><h2>Timeline</h2></div><a class="text-link" href="/schedules/new?device={{ device.id }}">Schedule this device →</a></section>
+<section class="section-heading"><div><p class="eyebrow">Recent state</p><h2>Timeline</h2></div>{% if request.state.identity.can_operate %}<a class="text-link" href="/schedules/new?device={{ device.id }}">Schedule this device →</a>{% endif %}</section>
 <div class="timeline-placeholder"><span>Live run transitions will appear here</span></div>
 
+{% if request.state.identity.can_operate %}
 <dialog id="manual-dialog" class="modal">
   <form method="dialog" id="manual-form" data-device="{{ device.id }}">
     <header><div><p class="eyebrow">Temporary override</p><h2>Manual <span id="manual-state-label">ON</span></h2></div><button value="cancel" class="icon-button" aria-label="Close">×</button></header>
@@ -44,4 +49,5 @@
     <footer><button value="cancel" class="button outline">Cancel</button><button value="default" class="button primary" id="manual-submit">Apply override</button></footer>
   </form>
 </dialog>
+{% endif %}
 {% endblock %}

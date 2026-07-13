@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -51,6 +52,16 @@ class FakeGateway:
         raise RuntimeError(f"unsupported fake action: {action}")
 
 
+def mutation_headers(client: TestClient) -> dict[str, str]:
+    page = client.get("/")
+    match = re.search(r'name="csrf-token" content="([^"]+)"', page.text)
+    assert match
+    return {
+        "X-CSRF-Token": match.group(1),
+        "Idempotency-Key": "test-request-0001",
+    }
+
+
 def test_fleet_pages_render() -> None:
     client = TestClient(create_app(FakeGateway()))
     dashboard = client.get("/")
@@ -58,6 +69,9 @@ def test_fleet_pages_render() -> None:
     assert "Sunlite 11002 - A" in dashboard.text
     assert "Stop all" in dashboard.text
     assert "✓" in dashboard.text
+    assert "HttpOnly" in dashboard.headers["set-cookie"]
+    assert dashboard.headers["x-frame-options"] == "DENY"
+    assert "frame-ancestors 'none'" in dashboard.headers["content-security-policy"]
     styles = client.get("/static/styles.css").text
     assert "#faf7f7" in styles
     assert 'Raleway, "Open Sans"' in styles
@@ -68,8 +82,10 @@ def test_fleet_pages_render() -> None:
 def test_web_commands_and_preview_use_gateway() -> None:
     gateway = FakeGateway()
     client = TestClient(create_app(gateway))
+    headers = mutation_headers(client)
     response = client.post(
         "/api/commands/manual",
+        headers=headers,
         json={
             "device_id": "sunlite-a",
             "state": "off",
@@ -79,9 +95,12 @@ def test_web_commands_and_preview_use_gateway() -> None:
     )
     assert response.status_code == 200
     assert gateway.requests[-1]["action"] == "device.manual"
+    assert gateway.requests[-1]["actor"] == "local-operator@sunlite.invalid"
+    assert gateway.requests[-1]["idempotency_key"] == "test-request-0001"
 
     preview = client.post(
         "/api/schedules/preview",
+        headers=headers,
         json={
             "id": "cycle-a",
             "device_id": "sunlite-a",
