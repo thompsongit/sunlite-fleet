@@ -18,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 sunlite-controller = "sunlite.controller:main"
+sunlite-maintenance = "sunlite.maintenance:main"
 sunlite-web = "sunlite.web:main"
 
 [dependency-groups]

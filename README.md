@@ -47,6 +47,10 @@ Administrators and operators can create schedules and issue commands. Other iden
 
 `SUNLITE_COOKIE_SECURE` defaults to `true` when Access is required. Set it to `false` only for trusted local HTTP testing.
 
+## Raspberry Pi deployment
+
+Use the [deployment guide](docs/deployment.md) for systemd installation, Cloudflare Tunnel, upgrades, backups, restoration, and troubleshooting.
+
 ## Operation
 
 - Use **Schedules** to create a recurring cycle or custom transition timeline for one simulator.

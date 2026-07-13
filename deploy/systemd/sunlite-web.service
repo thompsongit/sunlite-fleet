@@ -1,0 +1,51 @@
+[Unit]
+Description=Sunlite Scheduler web interface
+Documentation=file:/opt/sunlite-scheduler/current/docs/deployment.md
+After=network-online.target sunlite-controller.service
+Wants=network-online.target
+ConditionPathIsReadable=/etc/sunlite-scheduler/web.env
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=sunlite-web
+Group=sunlite-web
+SupplementaryGroups=sunlite
+WorkingDirectory=/opt/sunlite-scheduler/current
+EnvironmentFile=/etc/sunlite-scheduler/web.env
+ExecStartPre=/opt/sunlite-scheduler/current/.venv/bin/sunlite-maintenance check --config /etc/sunlite-scheduler/config.toml --environment /etc/sunlite-scheduler/web.env
+ExecStart=/opt/sunlite-scheduler/current/.venv/bin/sunlite-web --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+UMask=0027
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+
+NoNewPrivileges=true
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+ProtectSystem=strict
+ProcSubset=pid
+RemoveIPC=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

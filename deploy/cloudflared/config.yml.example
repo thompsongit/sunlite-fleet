@@ -1,0 +1,11 @@
+tunnel: replace-with-tunnel-uuid
+credentials-file: /etc/cloudflared/replace-with-tunnel-uuid.json
+no-autoupdate: true
+metrics: 127.0.0.1:20241
+
+ingress:
+  - hostname: replace-with-public-hostname
+    service: http://127.0.0.1:8000
+    originRequest:
+      connectTimeout: 10s
+  - service: http_status:404
