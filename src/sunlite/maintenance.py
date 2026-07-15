@@ -159,37 +159,23 @@ def _validate_environment(data: bytes) -> None:
         key, value = line.split("=", 1)
         values[key.strip()] = value.strip().strip("\"'")
 
-    required = (
-        "SUNLITE_CF_TEAM_DOMAIN",
-        "SUNLITE_CF_AUDIENCE",
-        "SUNLITE_SESSION_SECRET",
-        "SUNLITE_ALLOWED_HOSTS",
-        "SUNLITE_CONTROLLER_SOCKET",
-    )
-    if values.get("SUNLITE_ACCESS_REQUIRED", "").lower() not in {"1", "true", "yes", "on"}:
-        raise ValueError("Cloudflare Access must be required in production")
+    required = ("SUNLITE_SESSION_SECRET", "SUNLITE_CONTROLLER_SOCKET")
     for key in required:
         value = values.get(key, "")
         if not value or "replace" in value.lower() or "__" in value:
             raise ValueError(f"{key} is not configured")
     if len(values["SUNLITE_SESSION_SECRET"]) < 32:
         raise ValueError("SUNLITE_SESSION_SECRET must contain at least 32 characters")
-    if not values["SUNLITE_CF_TEAM_DOMAIN"].startswith("https://"):
-        raise ValueError("SUNLITE_CF_TEAM_DOMAIN must use https://")
     if values["SUNLITE_CONTROLLER_SOCKET"] != "/run/sunlite-scheduler/controller.sock":
         raise ValueError("SUNLITE_CONTROLLER_SOCKET must use /run/sunlite-scheduler")
-    if not values.get("SUNLITE_ADMIN_EMAILS") and not values.get("SUNLITE_OPERATOR_EMAILS"):
-        raise ValueError("configure at least one administrator or operator email")
-    role_emails = ",".join(
-        (values.get("SUNLITE_ADMIN_EMAILS", ""), values.get("SUNLITE_OPERATOR_EMAILS", ""))
-    )
-    if "replace" in role_emails.lower() or "@" not in role_emails:
-        raise ValueError("administrator and operator emails are not configured")
-    hosts = {item.strip() for item in values["SUNLITE_ALLOWED_HOSTS"].split(",")}
-    if hosts <= {"127.0.0.1", "localhost", "testserver"}:
-        raise ValueError("SUNLITE_ALLOWED_HOSTS must include the public hostname")
-    if values.get("SUNLITE_COOKIE_SECURE", "true").lower() not in {"1", "true", "yes", "on"}:
-        raise ValueError("secure cookies are required in production")
+    if not values.get("SUNLITE_WEB_HOST", "0.0.0.0"):
+        raise ValueError("SUNLITE_WEB_HOST must not be empty")
+    try:
+        port = int(values.get("SUNLITE_WEB_PORT", "8000"))
+    except ValueError as error:
+        raise ValueError("SUNLITE_WEB_PORT must be an integer") from error
+    if not 1 <= port <= 65535:
+        raise ValueError("SUNLITE_WEB_PORT must be between 1 and 65535")
 
 
 def _write_archive(path: Path, payload: dict[str, bytes], modified_at: int) -> None:

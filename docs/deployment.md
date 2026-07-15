@@ -5,7 +5,6 @@
 - Raspberry Pi OS with systemd, Python 3.11 or newer, and `python3-lgpio`.
 - [`uv`](https://docs.astral.sh/uv/getting-started/installation/), `curl`, and Git available from the root user's command path.
 - The Raspberry Pi OS `gpio` group and standard GPIO device permissions.
-- A Cloudflare-managed domain, Cloudflare Access application, named Tunnel, and the current [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/).
 - Completed relay wiring and a verified GPIO pin, polarity, and relay-profile configuration.
 
 Keep the simulator disconnected from relay control until the configuration has been reviewed. Activating the controller initializes every configured output OFF and begins schedule recovery.
@@ -34,7 +33,7 @@ sudoedit /etc/sunlite-scheduler/config.toml
 sudoedit /etc/sunlite-scheduler/web.env
 ```
 
-Set the actual BCM pins, relay polarity, devices, Cloudflare team domain, Access application audience tag, public hostname, and operator email addresses. The generated session secret should remain private.
+Set the actual BCM pins, relay polarity, devices, web bind address, and port. The generated session secret should remain private. The default `0.0.0.0:8000` bind is reachable through the Pi's Wi-Fi, LAN, and Tailscale addresses.
 
 Validate without starting GPIO control:
 
@@ -47,32 +46,6 @@ sudo systemd-analyze verify \
   /etc/systemd/system/sunlite-web.service
 ```
 
-## Cloudflare Access and Tunnel
-
-Create a Cloudflare Access self-hosted application for the public hostname before starting the Tunnel. Its application audience tag is the value of `SUNLITE_CF_AUDIENCE`. Access policies decide who may reach the application; the email lists in `web.env` decide who can operate it. Authenticated users not listed as administrators or operators are view-only.
-
-Create a locally managed named Tunnel and DNS route:
-
-```bash
-cloudflared tunnel login
-cloudflared tunnel create sunlite-scheduler
-cloudflared tunnel route dns sunlite-scheduler sunlite.example.com
-```
-
-Copy the generated Tunnel credentials to `/etc/cloudflared`, then install the example configuration:
-
-```bash
-sudo install -d -m 0755 /etc/cloudflared
-sudo install -m 0600 ~/.cloudflared/TUNNEL-UUID.json \
-  /etc/cloudflared/TUNNEL-UUID.json
-sudo install -m 0644 deploy/cloudflared/config.yml.example \
-  /etc/cloudflared/config.yml
-sudoedit /etc/cloudflared/config.yml
-sudo cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate
-```
-
-Replace every placeholder and keep the final catch-all `http_status:404` rule.
-
 ## First activation
 
 Confirm that all simulators may safely receive an OFF command, then start the application:
@@ -82,19 +55,12 @@ sudo sunlite-activate
 curl --fail http://127.0.0.1:8000/health
 ```
 
-Install and start the Tunnel service only after the local health check passes and Cloudflare Access is active:
-
-```bash
-sudo cloudflared --config /etc/cloudflared/config.yml service install
-sudo systemctl start cloudflared
-```
-
-Open the public hostname and verify viewer and operator accounts separately.
+Open `http://PI_ADDRESS:8000` from another device on the trusted network.
 
 ## Service operation
 
 ```bash
-sudo systemctl status sunlite-controller sunlite-web cloudflared
+sudo systemctl status sunlite-controller sunlite-web
 sudo journalctl -u sunlite-controller -u sunlite-web --since today
 sudo systemd-analyze security sunlite-controller.service sunlite-web.service
 ```
@@ -114,7 +80,7 @@ Check out the desired release, enter its repository directory, then run:
 sudo ./scripts/upgrade.sh
 ```
 
-The upgrade creates a verified backup, installs a versioned release, restarts both services, and checks local health. A failed health check restores the previous release and unit files. Controller restart interruption behavior follows each schedule's recovery policy.
+The upgrade creates a verified backup when a database exists, installs a versioned release, and restarts services that were already running. Stopped services remain stopped. A failed health check restores the previous release and unit files. Controller restart interruption behavior follows each schedule's recovery policy.
 
 ## Backup
 
@@ -137,7 +103,7 @@ sudo /opt/sunlite-scheduler/current/.venv/bin/sunlite-maintenance verify \
   /var/backups/sunlite-scheduler/BACKUP.tar.gz
 ```
 
-Backups contain the SQLite database, device configuration, Cloudflare role configuration, and session secret. Store them as credentials with mode `0600` or equivalent access control.
+Backups contain the SQLite database, device configuration, web configuration, and session secret. Store them as credentials with mode `0600` or equivalent access control.
 
 ## Restore
 
@@ -147,7 +113,7 @@ Restoration stops the application, creates a pre-restore safety backup, validate
 sudo sunlite-restore /var/backups/sunlite-scheduler/BACKUP.tar.gz
 ```
 
-Confirm controller health, device states, schedules, and Cloudflare access immediately after restoration.
+Confirm controller health, device states, schedules, and network access immediately after restoration.
 
 ## Troubleshooting
 
@@ -159,20 +125,11 @@ id sunlite-controller
 ls -l /dev/gpiomem /dev/gpiochip* 2>/dev/null
 ```
 
-Web startup or authentication failure:
+Web startup or access failure:
 
 ```bash
 sudo journalctl -u sunlite-web -n 100 --no-pager
 curl --fail http://127.0.0.1:8000/health
 ```
 
-Tunnel routing failure:
-
-```bash
-sudo systemctl status cloudflared
-sudo cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate
-sudo cloudflared tunnel --config /etc/cloudflared/config.yml ingress rule \
-  https://sunlite.example.com
-```
-
-Never bypass Cloudflare Access by binding the web service to a public interface.
+Every client that can reach the web interface can control the equipment. Use firewall rules, network segmentation, or an external authenticated proxy to limit access to trusted lab users.

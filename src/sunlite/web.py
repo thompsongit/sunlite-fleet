@@ -10,7 +10,6 @@ from typing import Annotated, Any
 
 import uvicorn
 from fastapi import Body, FastAPI, HTTPException, Request
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -20,11 +19,9 @@ from starlette.responses import Response
 from .codec import JsonObject
 from .ipc import ControllerClient, ControllerGateway
 from .security import (
-    AuthenticationError,
     Identity,
     SecurityManager,
     SecuritySettings,
-    TokenVerifier,
 )
 
 _ROOT = Path(__file__).parent
@@ -43,14 +40,12 @@ _COMMANDS = {
 def create_app(
     gateway: ControllerGateway | None = None,
     security_settings: SecuritySettings | None = None,
-    token_verifier: TokenVerifier | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Sunlite Scheduler", docs_url=None, redoc_url=None)
     app.state.gateway = gateway or ControllerClient(
         os.getenv("SUNLITE_CONTROLLER_SOCKET", "/tmp/sunlite-controller.sock")
     )
-    security = SecurityManager(security_settings or SecuritySettings.from_env(), token_verifier)
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(security.settings.allowed_hosts))
+    security = SecurityManager(security_settings or SecuritySettings.from_env())
     app.mount("/static", StaticFiles(directory=_ROOT / "static"), name="static")
 
     @app.middleware("http")
@@ -62,33 +57,19 @@ def create_app(
         )
         cookie_value: str | None = None
         if not public:
-            try:
-                identity = await security.authenticate(request)
-            except AuthenticationError as error:
-                error_response = JSONResponse(
-                    {"detail": str(error)},
-                    status_code=401,
-                    headers={"WWW-Authenticate": "Cloudflare-Access"},
-                )
-                security.apply_headers(error_response, request.url.path)
-                return error_response
+            identity = security.identity()
             session_id, value, is_new = security.session(request)
             cookie_value = value if is_new else None
             request.state.identity = identity
             request.state.csrf_token = security.csrf_token(session_id)
-            if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
-                if not identity.can_operate:
-                    forbidden_response = JSONResponse(
-                        {"detail": "Operator role required"}, status_code=403
-                    )
-                    security.apply_headers(forbidden_response, request.url.path)
-                    return forbidden_response
-                if not security.valid_csrf(request, session_id):
-                    csrf_response = JSONResponse(
-                        {"detail": "Invalid CSRF token"}, status_code=403
-                    )
-                    security.apply_headers(csrf_response, request.url.path)
-                    return csrf_response
+            if request.method in {"POST", "PUT", "PATCH", "DELETE"} and not security.valid_csrf(
+                request, session_id
+            ):
+                csrf_response = JSONResponse(
+                    {"detail": "Invalid CSRF token"}, status_code=403
+                )
+                security.apply_headers(csrf_response, request.url.path)
+                return csrf_response
         response = await call_next(request)
         if cookie_value:
             security.set_session_cookie(response, cookie_value)
@@ -295,7 +276,7 @@ app = create_app()
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the Sunlite web application")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--host", default=os.getenv("SUNLITE_WEB_HOST", "0.0.0.0"))
+    parser.add_argument("--port", type=int, default=int(os.getenv("SUNLITE_WEB_PORT", "8000")))
     arguments = parser.parse_args()
     uvicorn.run(app, host=arguments.host, port=arguments.port)
