@@ -145,8 +145,8 @@ function addCustomStep(offset = 0, state = "on") {
   const container = $("#custom-steps");
   const row = document.createElement("div");
   row.className = "custom-step";
-  row.innerHTML = `<label>Offset <span>minutes</span><input class="step-offset" type="number" min="0" step="0.0167" value="${offset}" required></label>
-    <label>State<select class="step-state"><option value="on">ON</option><option value="off">OFF</option></select></label>
+  row.innerHTML = `<label>Offset <span>minutes</span><input class="step-offset" name="step-offset" type="number" min="0" step="0.0167" value="${offset}" required></label>
+    <label>State<select class="step-state" name="step-state"><option value="on">ON</option><option value="off">OFF</option></select></label>
     <button type="button" class="icon-button remove-step" aria-label="Remove transition">×</button>`;
   $(".step-state", row).value = state;
   $(".remove-step", row).addEventListener("click", () => row.remove());
@@ -184,6 +184,79 @@ function setupScheduleEditor() {
   if (!form) return;
   const stored = JSON.parse($("#schedule-data").textContent || "null");
   const requestedDevice = new URLSearchParams(location.search).get("device");
+  const errorPanel = $("#schedule-error");
+
+  function clearError() {
+    errorPanel.hidden = true;
+    errorPanel.textContent = "";
+    for (const field of $$('[aria-invalid="true"]', form)) field.removeAttribute("aria-invalid");
+  }
+
+  function showError(message, field = null) {
+    errorPanel.textContent = message;
+    errorPanel.hidden = false;
+    if (field) {
+      field.setAttribute("aria-invalid", "true");
+      field.focus();
+    }
+    toast(message, true);
+    return false;
+  }
+
+  function setControlsEnabled(root, enabled) {
+    for (const control of $$("input, select, textarea", root)) control.disabled = !enabled;
+  }
+
+  function syncEndRule() {
+    const regular = $("#schedule-kind").value === "regular";
+    const time = $("#end-rule").value === "time";
+    $("#repeat-field").hidden = time;
+    $("#end-field").hidden = !time;
+    $("#repeat-count").disabled = !regular || time;
+    $("#repeat-count").required = regular && !time;
+    $("#ends-at").disabled = !regular || !time;
+    $("#ends-at").required = regular && time;
+    if (regular && time && !$("#ends-at").value) {
+      $("#ends-at").value = localInput(Date.now() + 60 * 60_000);
+    }
+  }
+
+  function validateEditor() {
+    clearError();
+    if (!form.reportValidity()) {
+      return showError("Complete the highlighted required field.", $(":invalid", form));
+    }
+    if ($("#schedule-kind").value === "regular") {
+      if ($("#end-rule").value === "time" && new Date($("#ends-at").value) <= new Date($("#starts-at").value)) {
+        return showError("End date and time must be after the start.", $("#ends-at"));
+      }
+      return true;
+    }
+
+    const rows = $$(".custom-step");
+    if (rows.length < 2) return showError("Add at least two custom transitions.");
+    const steps = rows.map(row => ({
+      offset: Number($(".step-offset", row).value),
+      state: $(".step-state", row).value,
+      field: $(".step-offset", row),
+    }));
+    if (steps[0].offset !== 0 || steps[0].state !== "on") {
+      return showError("The custom timeline must start ON at 0 minutes.", steps[0].field);
+    }
+    if (steps.at(-1).state !== "off") {
+      return showError("The custom timeline must end OFF.", $(".step-state", rows.at(-1)));
+    }
+    for (let index = 1; index < steps.length; index += 1) {
+      if (steps[index].offset <= steps[index - 1].offset) {
+        return showError("Custom offsets must be strictly increasing.", steps[index].field);
+      }
+      if (steps[index].state === steps[index - 1].state) {
+        return showError("Custom transition states must alternate.", $(".step-state", rows[index]));
+      }
+    }
+    return true;
+  }
+
   $("#starts-at").value = localInput(stored?.starts_at);
   if (stored) {
     $("#schedule-name").value = stored.name;
@@ -196,15 +269,14 @@ function setupScheduleEditor() {
     $("#schedule-kind").value = kind;
     $("#regular-fields").hidden = kind !== "regular";
     $("#custom-fields").hidden = kind !== "custom";
+    setControlsEnabled($("#regular-fields"), kind === "regular");
+    setControlsEnabled($("#custom-fields"), kind === "custom");
+    syncEndRule();
+    clearError();
     for (const button of $$('[data-kind]')) button.classList.toggle("active", button.dataset.kind === kind);
   }
   for (const button of $$('[data-kind]')) button.addEventListener("click", () => selectKind(button.dataset.kind));
-  $("#end-rule").addEventListener("change", event => {
-    const time = event.target.value === "time";
-    $("#repeat-field").hidden = time;
-    $("#end-field").hidden = !time;
-    if (time && !$("#ends-at").value) $("#ends-at").value = localInput(Date.now() + 60 * 60_000);
-  });
+  $("#end-rule").addEventListener("change", syncEndRule);
   $("#add-step").addEventListener("click", () => {
     const rows = $$(".custom-step");
     const offset = rows.length ? Number($(".step-offset", rows.at(-1)).value) + 10 : 0;
@@ -228,20 +300,23 @@ function setupScheduleEditor() {
     addCustomStep(30, "off");
   }
   selectKind(stored?.kind || "regular");
+  form.addEventListener("input", clearError);
 
   $("#preview-schedule").addEventListener("click", async () => {
+    if (!validateEditor()) return;
     try {
       const items = await api("/api/schedules/preview", { method: "POST", body: JSON.stringify(collectSchedule(stored?.id)) });
       $("#preview-title").textContent = `${items.length} commanded transitions`;
       $("#preview-list").innerHTML = items.map(item => `<li><strong>${item.state.toUpperCase()}</strong> · ${new Date(item.at).toLocaleString()}</li>`).join("");
-    } catch (error) { toast(error.message, true); }
+    } catch (error) { showError(error.message); }
   });
   form.addEventListener("submit", async event => {
     event.preventDefault();
+    if (!validateEditor()) return;
     try {
       await api("/api/schedules", { method: "POST", body: JSON.stringify(collectSchedule(stored?.id)) });
       location.assign("/schedules");
-    } catch (error) { toast(error.message, true); }
+    } catch (error) { showError(error.message); }
   });
 }
 

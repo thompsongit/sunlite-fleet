@@ -4,29 +4,30 @@
 <a class="back-link" href="/schedules">← Schedules</a>
 <section class="page-heading compact"><div><p class="eyebrow">Automation plan</p><h1>{% if schedule %}Edit schedule{% else %}New schedule{% endif %}</h1><p class="lede">Preview every transition before enabling the plan.</p></div></section>
 
-<form id="schedule-form" class="editor" data-timezone="{{ timezone }}">
+<form id="schedule-form" class="editor" data-timezone="{{ timezone }}" novalidate>
   <section class="form-section"><p class="step-number">01</p><div class="form-content"><h2>Identity</h2><div class="form-grid">
-    <label>Name<input id="schedule-name" required placeholder="Cell stability cycle"></label>
-    <label>Simulator<select id="schedule-device" required>{% for device in status.devices %}<option value="{{ device.id }}">{{ device.name }}</option>{% endfor %}</select></label>
+    <label>Name<input id="schedule-name" name="schedule-name" required placeholder="Cell stability cycle"></label>
+    <label>Simulator<select id="schedule-device" name="schedule-device" required>{% for device in status.devices %}<option value="{{ device.id }}">{{ device.name }}</option>{% endfor %}</select></label>
   </div></div></section>
 
   <section class="form-section"><p class="step-number">02</p><div class="form-content"><h2>Pattern</h2>
     <div class="segmented" role="group" aria-label="Schedule type"><button type="button" data-kind="regular" class="active">Regular cycle</button><button type="button" data-kind="custom">Custom timeline</button></div>
-    <input type="hidden" id="schedule-kind" value="regular">
-    <div class="form-grid"><label>Start date and time<input id="starts-at" type="datetime-local" required></label><label>Timezone<input value="{{ timezone }}" disabled></label></div>
+    <input type="hidden" id="schedule-kind" name="schedule-kind" value="regular">
+    <div class="form-grid"><label>Start date and time<input id="starts-at" name="starts-at" type="datetime-local" required></label><label>Timezone<input value="{{ timezone }}" disabled></label></div>
 
     <div id="regular-fields">
-      <div class="form-grid"><label>ON duration <span>minutes</span><input id="on-minutes" type="number" min="0.0167" step="0.0167" value="30"></label><label>OFF duration <span>minutes</span><input id="off-minutes" type="number" min="0.0167" step="0.0167" value="10"></label></div>
-      <div class="form-grid"><label>End rule<select id="end-rule"><option value="repeat">Repeat count</option><option value="time">End date and time</option></select></label><label id="repeat-field">Number of ON cycles<input id="repeat-count" type="number" min="1" value="3"></label><label id="end-field" hidden>End date and time<input id="ends-at" type="datetime-local"></label></div>
+      <div class="form-grid"><label>ON duration <span>minutes</span><input id="on-minutes" name="on-minutes" type="number" min="0.0167" step="0.0167" value="30" required></label><label>OFF duration <span>minutes</span><input id="off-minutes" name="off-minutes" type="number" min="0.0167" step="0.0167" value="10" required></label></div>
+      <div class="form-grid"><label>End rule<select id="end-rule" name="end-rule"><option value="repeat">Repeat count</option><option value="time">End date and time</option></select></label><label id="repeat-field">Number of ON cycles<input id="repeat-count" name="repeat-count" type="number" min="1" value="3" required></label><label id="end-field" hidden>End date and time<input id="ends-at" name="ends-at" type="datetime-local"></label></div>
     </div>
 
-    <div id="custom-fields" hidden><div id="custom-steps" class="custom-steps"></div><button type="button" class="text-link add-step" id="add-step">+ Add transition</button></div>
+    <div id="custom-fields" hidden><p class="form-hint">Start ON at 0 minutes, alternate states, and end OFF.</p><div id="custom-steps" class="custom-steps"></div><button type="button" class="text-link add-step" id="add-step">+ Add transition</button></div>
   </div></section>
 
-  <section class="form-section"><p class="step-number">03</p><div class="form-content"><h2>Recovery and preview</h2><div class="form-grid"><label>After controller restart<select id="recovery-policy"><option value="abort_if_interrupted">Abort interrupted run and remain OFF</option><option value="resume_if_active">Resume the current commanded state</option></select></label><label class="check-label"><input id="schedule-enabled" type="checkbox" checked><span>Enable after saving</span></label></div>
+  <section class="form-section"><p class="step-number">03</p><div class="form-content"><h2>Recovery and preview</h2><div class="form-grid"><label>After controller restart<select id="recovery-policy" name="recovery-policy"><option value="abort_if_interrupted">Abort interrupted run and remain OFF</option><option value="resume_if_active">Resume the current commanded state</option></select></label><label class="check-label"><input id="schedule-enabled" name="schedule-enabled" type="checkbox" checked><span>Enable after saving</span></label></div>
     <div class="preview-panel"><div><p class="eyebrow">Transition preview</p><h3 id="preview-title">Preview not generated</h3></div><button type="button" class="button outline" id="preview-schedule">Generate preview</button><ol id="preview-list"></ol></div>
   </div></section>
 
+  <p id="schedule-error" class="form-error" role="alert" hidden></p>
   <footer class="form-actions"><a class="button outline" href="/schedules">Cancel</a><button class="button primary" type="submit">Save schedule</button></footer>
 </form>
 <script type="application/json" id="schedule-data">{{ schedule|tojson if schedule else 'null' }}</script>
