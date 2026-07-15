@@ -40,7 +40,6 @@ ProtectKernelModules=true
 ProtectKernelTunables=true
 ProtectProc=invisible
 ProtectSystem=strict
-ProcSubset=pid
 RemoveIPC=true
 RestrictAddressFamilies=AF_UNIX
 RestrictNamespaces=true

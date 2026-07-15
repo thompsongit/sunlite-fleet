@@ -13,6 +13,7 @@ def test_deployment_assets_are_safe_by_default() -> None:
     )
     assert "User=sunlite-controller" in controller and "KillSignal=SIGINT" in controller
     assert "ProtectSystem=strict" in controller and "ProtectSystem=strict" in web
+    assert "PrivateDevices=true" not in controller and "ProcSubset=pid" not in controller
     assert "User=sunlite-web" in web and "ExecStart=" in web
     assert "SUNLITE_WEB_HOST=0.0.0.0" in environment
     assert all('chmod -R a+rX,go-w "$release"' in script for script in release_scripts)
