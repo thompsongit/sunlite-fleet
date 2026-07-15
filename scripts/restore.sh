@@ -36,6 +36,13 @@ systemctl stop sunlite-web.service sunlite-controller.service
   --database "$DATABASE" \
   --config "$CONFIG_ROOT/config.toml" \
   --environment "$CONFIG_ROOT/web.env"
+# shellcheck disable=SC1091
+source "$CONFIG_ROOT/web.env"
+health_host=${SUNLITE_WEB_HOST:-0.0.0.0}
+[[ $health_host == "0.0.0.0" ]] && health_host=127.0.0.1
+[[ $health_host == "::" ]] && health_host="::1"
+[[ $health_host == *:* ]] && health_host="[$health_host]"
+health_url="http://$health_host:${SUNLITE_WEB_PORT:-8000}/health"
 chown sunlite-controller:sunlite "$DATABASE"
 chown root:sunlite "$CONFIG_ROOT/config.toml"
 chown root:sunlite-web "$CONFIG_ROOT/web.env"
@@ -48,7 +55,7 @@ if $web_active; then
   systemctl start sunlite-web.service
   healthy=false
   for _attempt in {1..20}; do
-    if curl --fail --silent --max-time 2 http://127.0.0.1:8000/health >/dev/null; then
+    if curl --fail --silent --max-time 2 "$health_url" >/dev/null; then
       healthy=true
       break
     fi

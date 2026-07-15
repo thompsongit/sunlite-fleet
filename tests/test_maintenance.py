@@ -22,12 +22,9 @@ def test_backup_verify_and_restore(tmp_path: Path) -> None:
     )
     environment = tmp_path / "web.env"
     environment.write_text(
-        "SUNLITE_ACCESS_REQUIRED=true\n"
-        "SUNLITE_CF_TEAM_DOMAIN=https://lab.cloudflareaccess.com\n"
-        "SUNLITE_CF_AUDIENCE=audience\n"
+        "SUNLITE_WEB_HOST=0.0.0.0\n"
+        "SUNLITE_WEB_PORT=8000\n"
         f"SUNLITE_SESSION_SECRET={'s' * 32}\n"
-        "SUNLITE_ADMIN_EMAILS=admin@example.com\n"
-        "SUNLITE_ALLOWED_HOSTS=sunlite.example.com\n"
         "SUNLITE_CONTROLLER_SOCKET=/run/sunlite-scheduler/controller.sock\n"
     )
     archive = tmp_path / "backup.tar.gz"

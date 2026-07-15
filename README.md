@@ -29,27 +29,21 @@ uv run sunlite-web --host 127.0.0.1 --port 8000
 
 Open `http://127.0.0.1:8000`.
 
-## Access and roles
+## Network access
 
-Local simulation grants administrator access. To require Cloudflare Access, set these environment variables before starting the web application:
+The Raspberry Pi service listens on all configured network interfaces by default. Open it with the Pi's Wi-Fi, LAN, or Tailscale address:
 
 ```bash
-export SUNLITE_ACCESS_REQUIRED=true
-export SUNLITE_CF_TEAM_DOMAIN=https://your-team.cloudflareaccess.com
-export SUNLITE_CF_AUDIENCE=your-access-application-aud-tag
-export SUNLITE_SESSION_SECRET=replace-with-a-random-secret-of-at-least-32-characters
-export SUNLITE_ADMIN_EMAILS=lab-admin@example.com
-export SUNLITE_OPERATOR_EMAILS=scientist-a@example.com,scientist-b@example.com
-export SUNLITE_ALLOWED_HOSTS=sunlite.example.com,127.0.0.1,localhost
+http://PI_ADDRESS:8000
 ```
 
-Administrators and operators can create schedules and issue commands. Other identities accepted by the Cloudflare Access policy receive view-only access. Email matching is case-insensitive.
+Every client that can reach the interface can operate the controller. Restrict network access to trusted lab users. External tunnels, reverse proxies, and their authentication policies are configured separately from Sunlite Scheduler.
 
-`SUNLITE_COOKIE_SECURE` defaults to `true` when Access is required. Set it to `false` only for trusted local HTTP testing.
+Set `SUNLITE_WEB_HOST` or `SUNLITE_WEB_PORT` in `/etc/sunlite-scheduler/web.env` to use a different interface or port.
 
 ## Raspberry Pi deployment
 
-Use the [deployment guide](docs/deployment.md) for systemd installation, Cloudflare Tunnel, upgrades, backups, restoration, and troubleshooting.
+Use the [deployment guide](docs/deployment.md) for systemd installation, network access, upgrades, backups, restoration, and troubleshooting.
 
 ## Operation
 
