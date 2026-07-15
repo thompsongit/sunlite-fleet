@@ -50,7 +50,7 @@ uv venv --python "$(command -v python3)" --system-site-packages "$release/.venv"
 uv sync --project "$release" --frozen --no-dev
 "$release/.venv/bin/python" -c 'import lgpio; import gpiozero'
 chown -R root:root "$release"
-chmod -R go-w "$release"
+chmod -R a+rX,go-w "$release"
 
 temporary_link="$APP_ROOT/.current.new"
 rm -f "$temporary_link"

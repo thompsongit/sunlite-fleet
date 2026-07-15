@@ -56,7 +56,7 @@ if [[ -f "$STATE_ROOT/sunlite.db" ]]; then
     --release "$(basename "$previous")"
 fi
 chown -R root:root "$release"
-chmod -R go-w "$release"
+chmod -R a+rX,go-w "$release"
 
 rollback_units=$(mktemp -d)
 cp /etc/systemd/system/sunlite-controller.service \
