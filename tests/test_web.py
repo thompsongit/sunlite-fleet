@@ -76,7 +76,11 @@ def test_fleet_pages_render() -> None:
     assert "#faf7f7" in styles
     assert 'Raleway, "Open Sans"' in styles
     assert "health-line i" not in styles
-    assert "Custom timeline" in client.get("/schedules/new").text
+    editor = client.get("/schedules/new").text
+    assert "Custom timeline" in editor
+    assert 'name="schedule-name"' in editor and 'id="schedule-error"' in editor
+    script = client.get("/static/app.js").text
+    assert "setControlsEnabled" in script and "must end OFF" in script
 
 
 def test_web_commands_and_preview_use_gateway() -> None:
