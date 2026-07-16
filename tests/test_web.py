@@ -79,8 +79,9 @@ def test_fleet_pages_render() -> None:
     editor = client.get("/schedules/new").text
     assert "Custom timeline" in editor
     assert 'name="schedule-name"' in editor and 'id="schedule-error"' in editor
+    assert editor.count('step="any"') == 2
     script = client.get("/static/app.js").text
-    assert "setControlsEnabled" in script and "must end OFF" in script
+    assert "setControlsEnabled" in script and "must end OFF" in script and 'step="any"' in script
 
 
 def test_web_commands_and_preview_use_gateway() -> None:

@@ -16,7 +16,7 @@
     <div class="form-grid"><label>Start date and time<input id="starts-at" name="starts-at" type="datetime-local" required></label><label>Timezone<input value="{{ timezone }}" disabled></label></div>
 
     <div id="regular-fields">
-      <div class="form-grid"><label>ON duration <span>minutes</span><input id="on-minutes" name="on-minutes" type="number" min="0.0167" step="0.0167" value="30" required></label><label>OFF duration <span>minutes</span><input id="off-minutes" name="off-minutes" type="number" min="0.0167" step="0.0167" value="10" required></label></div>
+      <div class="form-grid"><label>ON duration <span>minutes</span><input id="on-minutes" name="on-minutes" type="number" min="0.0167" step="any" value="30" required></label><label>OFF duration <span>minutes</span><input id="off-minutes" name="off-minutes" type="number" min="0.0167" step="any" value="10" required></label></div>
       <div class="form-grid"><label>End rule<select id="end-rule" name="end-rule"><option value="repeat">Repeat count</option><option value="time">End date and time</option></select></label><label id="repeat-field">Number of ON cycles<input id="repeat-count" name="repeat-count" type="number" min="1" value="3" required></label><label id="end-field" hidden>End date and time<input id="ends-at" name="ends-at" type="datetime-local"></label></div>
     </div>
 
