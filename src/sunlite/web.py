@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 from collections.abc import AsyncIterator
@@ -26,6 +27,11 @@ from .security import (
 
 _ROOT = Path(__file__).parent
 _TEMPLATES = Jinja2Templates(directory=_ROOT / "templates")
+_ASSET_VERSION = hashlib.sha256(
+    (_ROOT / "static" / "app.js").read_bytes()
+    + (_ROOT / "static" / "styles.css").read_bytes()
+).hexdigest()[:12]
+_TEMPLATES.env.globals["asset_version"] = _ASSET_VERSION
 _COMMANDS = {
     "stop-all": "stop_all",
     "resume-all": "resume_all",

@@ -72,7 +72,10 @@ def test_fleet_pages_render() -> None:
     assert "HttpOnly" in dashboard.headers["set-cookie"]
     assert dashboard.headers["x-frame-options"] == "DENY"
     assert "frame-ancestors 'none'" in dashboard.headers["content-security-policy"]
-    styles = client.get("/static/styles.css").text
+    assert re.search(r'/static/app\.js\?v=[0-9a-f]{12}', dashboard.text)
+    static_response = client.get("/static/styles.css")
+    assert static_response.headers["cache-control"] == "no-cache"
+    styles = static_response.text
     assert "#faf7f7" in styles
     assert 'Raleway, "Open Sans"' in styles
     assert "health-line i" not in styles

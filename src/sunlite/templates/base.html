@@ -9,8 +9,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
-  <script defer src="{{ url_for('static', path='app.js') }}"></script>
+  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}?v={{ asset_version }}">
+  <script defer src="{{ url_for('static', path='app.js') }}?v={{ asset_version }}"></script>
 </head>
 <body data-page="{{ page }}">
   <header class="site-header">
