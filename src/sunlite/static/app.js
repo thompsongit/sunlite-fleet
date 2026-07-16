@@ -145,7 +145,7 @@ function addCustomStep(offset = 0, state = "on") {
   const container = $("#custom-steps");
   const row = document.createElement("div");
   row.className = "custom-step";
-  row.innerHTML = `<label>Offset <span>minutes</span><input class="step-offset" name="step-offset" type="number" min="0" step="0.0167" value="${offset}" required></label>
+  row.innerHTML = `<label>Offset <span>minutes</span><input class="step-offset" name="step-offset" type="number" min="0" step="any" value="${offset}" required></label>
     <label>State<select class="step-state" name="step-state"><option value="on">ON</option><option value="off">OFF</option></select></label>
     <button type="button" class="icon-button remove-step" aria-label="Remove transition">×</button>`;
   $(".step-state", row).value = state;
