@@ -2,20 +2,58 @@
 {% block title %}Schedules · Sunlite Scheduler{% endblock %}
 {% block content %}
 <section class="page-heading">
-  <div><p class="eyebrow">Automation</p><h1>Schedules</h1><p class="lede">Recurring cycles and one-off custom timelines for each simulator.</p></div>
+  <div><p class="eyebrow">Automation</p><h1>Schedules</h1><p class="lede">On-demand runs, regular cycles and custom future timelines for each simulator.</p></div>
   {% if request.state.identity.can_operate %}<a class="button primary" href="/schedules/new">New schedule</a>{% else %}<span class="status-pill">View-only access</span>{% endif %}
 </section>
 
 <section class="schedule-list">
   {% for schedule in schedules %}
   <article class="schedule-row" data-schedule-id="{{ schedule.id }}">
-    <div class="schedule-icon">{% if schedule.kind == 'regular' %}↻{% else %}⌁{% endif %}</div>
-    <div><p class="eyebrow">{{ schedule.kind }} · {{ schedule.device_id }}</p><h3>{{ schedule.name }}</h3><p>Starts {{ schedule.starts_at }} · {{ schedule.timezone }}</p></div>
+    <div class="schedule-icon">{% if schedule.kind == 'regular' %}↻{% elif schedule.kind == 'on_demand' %}▶{% else %}⌁{% endif %}</div>
+    <div>
+      <p class="eyebrow">{% if schedule.kind == 'on_demand' %}On-demand run{% elif schedule.kind == 'regular' %}Scheduled regular cycle{% else %}Scheduled custom timeline{% endif %} · {{ schedule.device_name }}</p>
+      <h3>{{ schedule.name }}</h3>
+      {% if schedule.kind == 'on_demand' %}
+      <p>Launch when ready · Handoff {{ schedule.handoff_seconds }} s · OCP {{ schedule.ocp_seconds }} s</p>
+      {% else %}
+      <p>Preparation begins {{ schedule.starts_at|local_time(schedule.timezone) }} · Handoff {{ schedule.handoff_seconds }} s · OCP {{ schedule.ocp_seconds }} s</p>
+      {% endif %}
+    </div>
     <span class="status-pill {% if schedule.enabled %}enabled{% endif %}">{% if schedule.enabled %}Enabled{% else %}Disabled{% endif %}</span>
-    {% if request.state.identity.can_operate %}<div class="row-actions"><a class="button text" href="/schedules/{{ schedule.id }}/edit">Edit</a><button class="button text danger-text" data-delete-schedule="{{ schedule.id }}">Delete</button></div>{% endif %}
+    {% if request.state.identity.can_operate %}
+    <div class="row-actions">
+      {% if schedule.kind == 'on_demand' and schedule.enabled %}
+      <button class="button primary" data-launch-schedule="{{ schedule.id }}" data-device="{{ schedule.device_id }}" data-device-name="{{ schedule.device_name }}" data-name="{{ schedule.name }}" data-handoff="{{ schedule.handoff_seconds }}" data-ocp="{{ schedule.ocp_seconds }}">Launch run</button>
+      {% endif %}
+      <a class="button text" href="/schedules/{{ schedule.id }}/edit">Edit</a>
+      <button class="button text danger-text" data-delete-schedule="{{ schedule.id }}">Delete</button>
+    </div>
+    {% endif %}
   </article>
   {% else %}
-  <div class="empty-state"><h3>No schedules yet</h3><p>Create a regular cycle or custom experiment timeline.</p>{% if request.state.identity.can_operate %}<a class="text-link" href="/schedules/new">Create the first schedule →</a>{% endif %}</div>
+  <div class="empty-state"><h3>No schedules yet</h3><p>Create an on-demand run, regular cycle or custom future timeline.</p>{% if request.state.identity.can_operate %}<a class="text-link" href="/schedules/new">Create the first schedule →</a>{% endif %}</div>
   {% endfor %}
 </section>
+
+{% if request.state.identity.can_operate %}
+<dialog id="launch-dialog" class="modal launch-modal">
+  <form method="dialog" id="launch-form">
+    <header><div><p class="eyebrow">Verification</p><h2>Launch on-demand run</h2></div><button value="cancel" class="icon-button" aria-label="Close">×</button></header>
+    <dl class="launch-summary">
+      <div><dt>Simulator</dt><dd id="launch-device">—</dd></div>
+      <div><dt>Schedule</dt><dd id="launch-name">—</dd></div>
+    </dl>
+    <div class="form-grid">
+      <label>Handoff delay <span>seconds</span><input id="launch-handoff" type="number" min="0" step="any" required></label>
+      <label>OCP period <span>seconds</span><input id="launch-ocp" type="number" min="0" step="any" required></label>
+    </div>
+    <div class="launch-verification">
+      <div><span>Handoff countdown</span><strong id="launch-handoff-summary">—</strong></div>
+      <div><span>OCP countdown</span><strong id="launch-ocp-summary">—</strong></div>
+    </div>
+    <p class="form-hint">Changing OCP shifts every custom run time by the same amount, preserving the programmed light sequence. Authoritative SAST times appear after launch is accepted.</p>
+    <footer><button value="cancel" class="button outline">Cancel</button><button value="default" class="button primary">Begin launch countdown</button></footer>
+  </form>
+</dialog>
+{% endif %}
 {% endblock %}

@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
+from zoneinfo import ZoneInfo
 
 import uvicorn
 from fastapi import Body, FastAPI, HTTPException, Request
@@ -26,6 +29,23 @@ from .security import (
 
 _ROOT = Path(__file__).parent
 _TEMPLATES = Jinja2Templates(directory=_ROOT / "templates")
+_ASSET_VERSION = hashlib.sha256(
+    (_ROOT / "static" / "app.js").read_bytes()
+    + (_ROOT / "static" / "styles.css").read_bytes()
+).hexdigest()[:12]
+_TEMPLATES.env.globals["asset_version"] = _ASSET_VERSION
+
+
+def _format_local(value: object, timezone: str) -> str:
+    if not value:
+        return "—"
+    parsed = datetime.fromisoformat(str(value))
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("display timestamp must be timezone-aware")
+    return parsed.astimezone(ZoneInfo(timezone)).strftime("%d %b %Y, %H:%M:%S %Z")
+
+
+_TEMPLATES.env.filters["local_time"] = _format_local
 _COMMANDS = {
     "stop-all": "stop_all",
     "resume-all": "resume_all",
@@ -101,6 +121,16 @@ def create_app(
     async def schedules_page(request: Request) -> HTMLResponse:
         status = await _safe_request(app, {"action": "status"}, _offline_status())
         schedules = await _safe_request(app, {"action": "schedules.list"}, [])
+        device_names = {
+            str(device.get("id")): str(device.get("name"))
+            for device in status.get("devices", [])
+            if isinstance(device, dict)
+        }
+        for schedule in schedules:
+            if isinstance(schedule, dict):
+                schedule["device_name"] = device_names.get(
+                    str(schedule.get("device_id")), str(schedule.get("device_id", ""))
+                )
         return _TEMPLATES.TemplateResponse(
             request,
             "schedules.html",
@@ -168,13 +198,41 @@ def create_app(
             app,
             _mutation(
                 request,
-                {"action": "schedules.save", "schedule": payload},
+                {
+                    "action": "schedules.save",
+                    "schedule": _normalize_schedule_times(payload),
+                },
             ),
         )
 
     @app.post("/api/schedules/preview")
     async def preview_schedule(payload: Annotated[JsonObject, Body()]) -> Any:
-        return await _request(app, {"action": "schedules.preview", "schedule": payload})
+        return await _request(
+            app,
+            {
+                "action": "schedules.preview",
+                "schedule": _normalize_schedule_times(payload),
+            },
+        )
+
+    @app.post("/api/schedules/{schedule_id}/launch")
+    async def launch_schedule(
+        request: Request,
+        schedule_id: str,
+        payload: Annotated[JsonObject, Body()],
+    ) -> Any:
+        return await _request(
+            app,
+            _mutation(
+                request,
+                {
+                    "action": "schedules.launch",
+                    "id": schedule_id,
+                    "handoff_seconds": payload.get("handoff_seconds"),
+                    "ocp_seconds": payload.get("ocp_seconds"),
+                },
+            ),
+        )
 
     @app.delete("/api/schedules/{schedule_id}")
     async def delete_schedule(request: Request, schedule_id: str) -> Any:
@@ -269,6 +327,42 @@ def _mutation(request: Request, payload: JsonObject) -> JsonObject:
         "actor": _identity(request).email,
         "idempotency_key": key,
     }
+
+
+def _normalize_schedule_times(payload: JsonObject) -> JsonObject:
+    normalized = dict(payload)
+    if str(normalized.get("kind", "")) == "on_demand":
+        normalized.pop("starts_at", None)
+        normalized.pop("starts_at_local", None)
+        normalized.pop("ends_at", None)
+        normalized.pop("ends_at_local", None)
+        return normalized
+
+    timezone = str(normalized.get("timezone", "")).strip()
+    if not timezone:
+        raise HTTPException(400, "timezone is required")
+    try:
+        zone = ZoneInfo(timezone)
+    except Exception as error:
+        raise HTTPException(400, f"unknown timezone: {timezone}") from error
+
+    local_start = normalized.pop("starts_at_local", None)
+    if local_start is not None:
+        normalized["starts_at"] = _wall_time_to_utc(local_start, zone, "starts_at_local")
+    local_end = normalized.pop("ends_at_local", None)
+    if local_end:
+        normalized["ends_at"] = _wall_time_to_utc(local_end, zone, "ends_at_local")
+    return normalized
+
+
+def _wall_time_to_utc(value: object, zone: ZoneInfo, field: str) -> str:
+    try:
+        local = datetime.fromisoformat(str(value))
+    except ValueError as error:
+        raise HTTPException(400, f"{field} must be a valid local date and time") from error
+    if local.tzinfo is not None:
+        raise HTTPException(400, f"{field} must not contain a timezone offset")
+    return local.replace(tzinfo=zone).astimezone(UTC).isoformat()
 
 
 app = create_app()

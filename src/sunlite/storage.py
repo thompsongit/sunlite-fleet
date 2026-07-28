@@ -15,6 +15,7 @@ from .domain import (
     DeviceMode,
     DeviceRuntime,
     ManualOverride,
+    OnDemandSchedule,
     RecoveryPolicy,
     RegularSchedule,
     RunRecord,
@@ -115,6 +116,42 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         """,
     ),
     (2, "ALTER TABLE schedules ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;"),
+    (
+        3,
+        """
+        ALTER TABLE schedules
+            ADD COLUMN handoff_seconds REAL NOT NULL DEFAULT 0;
+        ALTER TABLE schedules
+            ADD COLUMN ocp_seconds REAL NOT NULL DEFAULT 0;
+        ALTER TABLE schedules
+            ADD COLUMN source_template_id TEXT;
+
+        CREATE TABLE on_demand_schedules (
+            id TEXT PRIMARY KEY,
+            device_id TEXT NOT NULL REFERENCES devices(id),
+            name TEXT NOT NULL,
+            timezone TEXT NOT NULL,
+            recovery_policy TEXT NOT NULL,
+            enabled INTEGER NOT NULL,
+            handoff_seconds REAL NOT NULL DEFAULT 0,
+            ocp_seconds REAL NOT NULL DEFAULT 0,
+            archived INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE on_demand_steps (
+            schedule_id TEXT NOT NULL
+                REFERENCES on_demand_schedules(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL,
+            offset_seconds REAL NOT NULL,
+            state TEXT NOT NULL,
+            PRIMARY KEY (schedule_id, position)
+        );
+
+        ALTER TABLE runs ADD COLUMN source_schedule_id TEXT;
+        ALTER TABLE runs ADD COLUMN handoff_seconds REAL NOT NULL DEFAULT 0;
+        ALTER TABLE runs ADD COLUMN ocp_seconds REAL NOT NULL DEFAULT 0;
+        ALTER TABLE runs ADD COLUMN first_light_at_utc TEXT;
+        """,
+    ),
 )
 
 
@@ -198,7 +235,9 @@ class Repository:
                 for row in connection.execute("SELECT id, name FROM devices ORDER BY id")
             }
 
-    def save_schedule(self, schedule: Schedule) -> None:
+    def save_schedule(
+        self, schedule: Schedule, source_template_id: str | None = None
+    ) -> None:
         from .scheduling import validate_schedule
 
         validate_schedule(schedule)
@@ -207,14 +246,18 @@ class Repository:
             connection.execute(
                 """INSERT INTO schedules
                    (id, device_id, name, kind, starts_at_utc, timezone, recovery_policy,
-                   enabled, on_seconds, off_seconds, repeat_count, ends_at_utc, archived)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                   enabled, on_seconds, off_seconds, repeat_count, ends_at_utc, archived,
+                   handoff_seconds, ocp_seconds, source_template_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
                    ON CONFLICT(id) DO UPDATE SET device_id=excluded.device_id, name=excluded.name,
                    kind=excluded.kind, starts_at_utc=excluded.starts_at_utc,
                    timezone=excluded.timezone, recovery_policy=excluded.recovery_policy,
                    enabled=excluded.enabled, on_seconds=excluded.on_seconds,
                    off_seconds=excluded.off_seconds, repeat_count=excluded.repeat_count,
-                   ends_at_utc=excluded.ends_at_utc, archived=0""",
+                   ends_at_utc=excluded.ends_at_utc, archived=0,
+                   handoff_seconds=excluded.handoff_seconds,
+                   ocp_seconds=excluded.ocp_seconds,
+                   source_template_id=excluded.source_template_id""",
                 (
                     schedule.id,
                     schedule.device_id,
@@ -228,6 +271,9 @@ class Repository:
                     regular.off_duration.total_seconds() if regular else None,
                     regular.repeat_count if regular else None,
                     _dump_datetime(regular.ends_at) if regular and regular.ends_at else None,
+                    schedule.handoff_delay.total_seconds(),
+                    schedule.ocp_duration.total_seconds(),
+                    source_template_id,
                 ),
             )
             connection.execute("DELETE FROM schedule_steps WHERE schedule_id = ?", (schedule.id,))
@@ -255,6 +301,84 @@ class Repository:
             )
             return tuple(self._schedule_from_row(connection, row) for row in rows)
 
+    def list_scheduled_definitions(self) -> tuple[Schedule, ...]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT * FROM schedules
+                   WHERE archived = 0 AND source_template_id IS NULL
+                   ORDER BY starts_at_utc, id"""
+            )
+            return tuple(self._schedule_from_row(connection, row) for row in rows)
+
+    def source_template_id(self, schedule_id: str) -> str | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT source_template_id FROM schedules WHERE id = ?",
+                (schedule_id,),
+            ).fetchone()
+            if row is None or not row["source_template_id"]:
+                return None
+            return str(row["source_template_id"])
+
+    def save_on_demand(self, schedule: OnDemandSchedule) -> None:
+        from .scheduling import validate_on_demand
+
+        validate_on_demand(schedule)
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO on_demand_schedules
+                   (id, device_id, name, timezone, recovery_policy, enabled,
+                    handoff_seconds, ocp_seconds, archived)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+                   ON CONFLICT(id) DO UPDATE SET
+                   device_id=excluded.device_id, name=excluded.name,
+                   timezone=excluded.timezone,
+                   recovery_policy=excluded.recovery_policy,
+                   enabled=excluded.enabled,
+                   handoff_seconds=excluded.handoff_seconds,
+                   ocp_seconds=excluded.ocp_seconds,
+                   archived=0""",
+                (
+                    schedule.id,
+                    schedule.device_id,
+                    schedule.name,
+                    schedule.timezone,
+                    schedule.recovery_policy.value,
+                    schedule.enabled,
+                    schedule.handoff_delay.total_seconds(),
+                    schedule.ocp_duration.total_seconds(),
+                ),
+            )
+            connection.execute(
+                "DELETE FROM on_demand_steps WHERE schedule_id = ?", (schedule.id,)
+            )
+            connection.executemany(
+                """INSERT INTO on_demand_steps
+                   (schedule_id, position, offset_seconds, state)
+                   VALUES (?, ?, ?, ?)""",
+                (
+                    (schedule.id, position, step.offset.total_seconds(), step.state.value)
+                    for position, step in enumerate(schedule.steps)
+                ),
+            )
+
+    def get_on_demand(self, schedule_id: str) -> OnDemandSchedule | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """SELECT * FROM on_demand_schedules
+                   WHERE id = ? AND archived = 0""",
+                (schedule_id,),
+            ).fetchone()
+            return self._on_demand_from_row(connection, row) if row else None
+
+    def list_on_demand(self) -> tuple[OnDemandSchedule, ...]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT * FROM on_demand_schedules
+                   WHERE archived = 0 ORDER BY name, id"""
+            )
+            return tuple(self._on_demand_from_row(connection, row) for row in rows)
+
     def set_schedule_enabled(self, schedule_id: str, enabled: bool) -> None:
         with self.connect() as connection:
             cursor = connection.execute(
@@ -271,6 +395,22 @@ class Repository:
                 (schedule_id,),
             )
             if cursor.rowcount != 1:
+                raise KeyError(f"unknown schedule: {schedule_id}")
+
+    def archive_definition(self, schedule_id: str) -> None:
+        with self.connect() as connection:
+            scheduled = connection.execute(
+                """UPDATE schedules SET archived = 1, enabled = 0
+                   WHERE id = ? AND archived = 0
+                   AND source_template_id IS NULL""",
+                (schedule_id,),
+            )
+            on_demand = connection.execute(
+                """UPDATE on_demand_schedules SET archived = 1, enabled = 0
+                   WHERE id = ? AND archived = 0""",
+                (schedule_id,),
+            )
+            if scheduled.rowcount + on_demand.rowcount != 1:
                 raise KeyError(f"unknown schedule: {schedule_id}")
 
     def save_runtime(self, runtime: DeviceRuntime) -> None:
@@ -392,11 +532,21 @@ class Repository:
             connection.execute(
                 """INSERT INTO runs
                    (id, schedule_id, device_id, planned_start_utc,
-                    actual_start_utc, actual_end_utc, outcome)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                    actual_start_utc, actual_end_utc, outcome,
+                    source_schedule_id, handoff_seconds, ocp_seconds,
+                    first_light_at_utc)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(id) DO UPDATE SET
                    actual_start_utc=COALESCE(excluded.actual_start_utc, runs.actual_start_utc),
-                   actual_end_utc=excluded.actual_end_utc, outcome=excluded.outcome""",
+                   actual_end_utc=excluded.actual_end_utc, outcome=excluded.outcome,
+                   source_schedule_id=COALESCE(
+                       excluded.source_schedule_id, runs.source_schedule_id
+                   ),
+                   handoff_seconds=excluded.handoff_seconds,
+                   ocp_seconds=excluded.ocp_seconds,
+                   first_light_at_utc=COALESCE(
+                       excluded.first_light_at_utc, runs.first_light_at_utc
+                   )""",
                 (
                     run.id,
                     run.schedule_id,
@@ -405,6 +555,10 @@ class Repository:
                     _dump_datetime(run.actual_start) if run.actual_start else None,
                     _dump_datetime(run.actual_end) if run.actual_end else None,
                     run.outcome,
+                    run.source_schedule_id,
+                    run.handoff_delay.total_seconds(),
+                    run.ocp_duration.total_seconds(),
+                    _dump_datetime(run.first_light_at) if run.first_light_at else None,
                 ),
             )
 
@@ -453,6 +607,16 @@ class Repository:
                         else None
                     ),
                     outcome=str(row["outcome"]),
+                    source_schedule_id=(
+                        str(row["source_schedule_id"]) if row["source_schedule_id"] else None
+                    ),
+                    handoff_delay=timedelta(seconds=float(row["handoff_seconds"])),
+                    ocp_duration=timedelta(seconds=float(row["ocp_seconds"])),
+                    first_light_at=(
+                        _load_datetime(row["first_light_at_utc"])
+                        if row["first_light_at_utc"]
+                        else None
+                    ),
                 )
                 for row in rows
             )
@@ -479,6 +643,8 @@ class Repository:
                 ends_at=(_load_datetime(row["ends_at_utc"]) if row["ends_at_utc"] else None),
                 recovery_policy=recovery_policy,
                 enabled=enabled,
+                handoff_delay=timedelta(seconds=float(row["handoff_seconds"])),
+                ocp_duration=timedelta(seconds=float(row["ocp_seconds"])),
             )
         steps = tuple(
             ScheduleStep(
@@ -499,6 +665,34 @@ class Repository:
             steps=steps,
             recovery_policy=recovery_policy,
             enabled=enabled,
+            handoff_delay=timedelta(seconds=float(row["handoff_seconds"])),
+            ocp_duration=timedelta(seconds=float(row["ocp_seconds"])),
+        )
+
+    @staticmethod
+    def _on_demand_from_row(
+        connection: sqlite3.Connection, row: sqlite3.Row
+    ) -> OnDemandSchedule:
+        steps = tuple(
+            ScheduleStep(
+                timedelta(seconds=float(step["offset_seconds"])),
+                CommandedState(step["state"]),
+            )
+            for step in connection.execute(
+                "SELECT * FROM on_demand_steps WHERE schedule_id = ? ORDER BY position",
+                (row["id"],),
+            )
+        )
+        return OnDemandSchedule(
+            id=str(row["id"]),
+            device_id=str(row["device_id"]),
+            name=str(row["name"]),
+            timezone=str(row["timezone"]),
+            steps=steps,
+            recovery_policy=RecoveryPolicy(row["recovery_policy"]),
+            enabled=bool(row["enabled"]),
+            handoff_delay=timedelta(seconds=float(row["handoff_seconds"])),
+            ocp_duration=timedelta(seconds=float(row["ocp_seconds"])),
         )
 
 

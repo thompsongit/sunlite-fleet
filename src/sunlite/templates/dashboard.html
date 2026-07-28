@@ -45,7 +45,10 @@
     <dl class="status-list">
       <div><dt>Mode</dt><dd data-field="mode">{{ device.mode|replace('_', ' ')|title }}</dd></div>
       <div><dt>Active run</dt><dd data-field="active">{{ device.active_schedule_name or 'None' }}</dd></div>
-      <div><dt>Next transition</dt><dd data-field="next">{% if device.next_transition %}{{ device.next_transition.state|upper }} · {{ device.next_transition.at }}{% else %}Not scheduled{% endif %}</dd></div>
+      <div><dt>Phase</dt><dd data-field="phase">{% if device.phase == 'ocp' %}OCP{% else %}{{ device.phase|default('idle')|replace('_', ' ')|title }}{% endif %}</dd></div>
+      <div><dt>Handoff delay</dt><dd data-field="handoff">Not active</dd></div>
+      <div><dt>OCP period</dt><dd data-field="ocp">Not active</dd></div>
+      <div><dt>Next transition</dt><dd data-field="next">{% if device.next_transition %}{{ device.next_transition.state|upper }} · {{ device.next_transition.at|local_time(status.timezone) }}{% else %}Not scheduled{% endif %}</dd></div>
     </dl>
     <footer><span data-field="fault">{% if device.fault %}Fault: {{ device.fault }}{% else %}No faults{% endif %}</span><span aria-hidden="true">↗</span></footer>
   </article>

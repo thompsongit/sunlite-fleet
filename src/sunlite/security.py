@@ -84,8 +84,9 @@ class SecurityManager:
         response.headers["Referrer-Policy"] = "same-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
-        if not path.startswith("/static/"):
-            response.headers["Cache-Control"] = "no-store"
+        response.headers["Cache-Control"] = (
+            "no-cache" if path.startswith("/static/") else "no-store"
+        )
 
     def _validate_session(self, value: str) -> str | None:
         try:

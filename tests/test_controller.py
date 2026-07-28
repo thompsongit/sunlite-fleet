@@ -7,7 +7,13 @@ from sunlite.clock import FakeClock
 from sunlite.codec import schedule_to_dict
 from sunlite.config import load_config
 from sunlite.controller import ControllerService
-from sunlite.domain import CommandedState, RecoveryPolicy, RegularSchedule
+from sunlite.domain import (
+    CommandedState,
+    OnDemandSchedule,
+    RecoveryPolicy,
+    RegularSchedule,
+    ScheduleStep,
+)
 from sunlite.ipc import ControllerClient, ControllerSocketServer
 from sunlite.relay import RecordingRelay
 from sunlite.storage import Repository
@@ -98,3 +104,47 @@ def test_recovery_and_unix_socket_round_trip(tmp_path: Path) -> None:
             await server.close()
 
     asyncio.run(scenario())
+
+
+def test_on_demand_launch_counts_handoff_before_ocp_run(tmp_path: Path) -> None:
+    config = load_config(Path(__file__).parents[1] / "config.example.toml")
+    clock = FakeClock(NOW)
+    repository = Repository(tmp_path / "on-demand.db")
+    relay = RecordingRelay(tuple(device.id for device in config.devices))
+    controller = ControllerService(config, repository, relay, clock)
+    controller.initialize()
+    plan = OnDemandSchedule(
+        "ocp-a",
+        "sunlite-a",
+        "OCP stability",
+        "Africa/Johannesburg",
+        (
+            ScheduleStep(timedelta(seconds=60), CommandedState.ON),
+            ScheduleStep(timedelta(seconds=75), CommandedState.OFF),
+        ),
+        handoff_delay=timedelta(seconds=4),
+        ocp_duration=timedelta(seconds=60),
+    )
+    controller.handle(
+        {
+            "action": "schedules.save",
+            "schedule": schedule_to_dict(plan),
+            "idempotency_key": "save-on-demand-plan-0001",
+        }
+    )
+    status = controller.handle(
+        {
+            "action": "schedules.launch",
+            "id": plan.id,
+            "handoff_seconds": 4,
+            "ocp_seconds": 60,
+            "idempotency_key": "launch-on-demand-0001",
+        }
+    )
+    assert status["devices"][0]["phase"] == "handoff"
+    clock.advance(timedelta(seconds=4))
+    assert controller.reconcile()["devices"][0]["phase"] == "ocp"
+    assert repository.list_runs()[0].actual_start == NOW + timedelta(seconds=4)
+    clock.advance(timedelta(seconds=60))
+    controller.reconcile()
+    assert relay.state("sunlite-a") is CommandedState.ON
