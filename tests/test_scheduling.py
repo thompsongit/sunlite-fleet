@@ -6,6 +6,7 @@ import pytest
 from sunlite.domain import (
     CommandedState,
     CustomSchedule,
+    OnDemandSchedule,
     RecoveryAction,
     RecoveryPolicy,
     RegularSchedule,
@@ -13,7 +14,9 @@ from sunlite.domain import (
 )
 from sunlite.scheduling import (
     find_conflicts,
+    phase_at,
     preview,
+    preview_on_demand,
     recovery_action,
     state_at,
     validate_schedule,
@@ -86,3 +89,34 @@ def test_custom_schedule_conflicts_and_recovery() -> None:
     invalid = replace(custom, steps=custom.steps[:-1])
     with pytest.raises(ValueError, match="end OFF"):
         validate_schedule(invalid)
+
+
+def test_handoff_and_ocp_are_distinct_and_custom_times_include_ocp() -> None:
+    prepared = replace(
+        regular(),
+        handoff_delay=timedelta(seconds=4),
+        ocp_duration=timedelta(seconds=60),
+    )
+    assert phase_at(prepared, START + timedelta(seconds=2)) == "handoff"
+    assert phase_at(prepared, START + timedelta(seconds=10)) == "ocp"
+    assert state_at(prepared, START + timedelta(seconds=64)) is CommandedState.ON
+
+    on_demand = OnDemandSchedule(
+        "ready-a",
+        "sunlite-a",
+        "OCP run",
+        "Africa/Johannesburg",
+        (
+            ScheduleStep(timedelta(seconds=60), CommandedState.ON),
+            ScheduleStep(timedelta(seconds=75), CommandedState.OFF),
+        ),
+        handoff_delay=timedelta(seconds=4),
+        ocp_duration=timedelta(seconds=60),
+    )
+    assert [
+        (item.run_time.total_seconds(), item.state) for item in preview_on_demand(on_demand)
+    ] == [
+        (0, CommandedState.OFF),
+        (60, CommandedState.ON),
+        (75, CommandedState.OFF),
+    ]

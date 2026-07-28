@@ -14,26 +14,40 @@
   </div>
 </section>
 
-<section class="detail-panel">
+<section class="detail-panel" data-device-id="{{ device.id }}">
   <div class="metric"><span>Mode</span><strong data-field="mode">{{ device.mode|replace('_', ' ')|title }}</strong></div>
   <div class="metric"><span>Active run</span><strong data-field="active">{{ device.active_schedule_name or 'None' }}</strong></div>
-  <div class="metric"><span>Next transition</span><strong data-field="next">{% if device.next_transition %}{{ device.next_transition.state|upper }} · {{ device.next_transition.at }}{% else %}Not scheduled{% endif %}</strong></div>
+  <div class="metric"><span>Next transition</span><strong data-field="next">{% if device.next_transition %}{{ device.next_transition.state|upper }} · {{ device.next_transition.at|local_time(status.timezone) }}{% else %}Not scheduled{% endif %}</strong></div>
   <div class="metric"><span>Controller</span><strong>{% if status.healthy %}Healthy{% else %}Offline{% endif %}</strong></div>
 </section>
 
-<section class="control-panel">
+<section class="control-panel" data-device-id="{{ device.id }}">
   <div><p class="eyebrow">Device controls</p><h2>Override operation</h2><p>Stop cancels the active run. Pause retains it for an explicit resume.</p></div>
   {% if request.state.identity.can_operate %}
   <div class="button-row wrap">
-    <button class="button danger" data-command="stop" data-device="{{ device.id }}">Stop</button>
-    <button class="button outline" data-command="pause" data-device="{{ device.id }}">Pause</button>
-    <button class="button outline" data-command="resume" data-device="{{ device.id }}">Resume</button>
+    <button class="button danger" data-command="stop" data-device="{{ device.id }}">Stop run</button>
+    <button class="button outline" data-command="pause" data-device="{{ device.id }}">Pause run</button>
+    <button class="button outline" data-command="resume" data-device="{{ device.id }}">Resume run</button>
     <button class="button outline" data-open-manual="off">Manual off</button>
     <button class="button primary" data-open-manual="on">Manual on</button>
   </div>
   {% else %}
   <span class="status-pill">View-only access</span>
   {% endif %}
+</section>
+
+<section class="preparation-panel" data-device-id="{{ device.id }}">
+  <div class="preparation-heading">
+    <div><p class="eyebrow">Live preparation</p><h2 data-field="phase">{% if device.phase == 'ocp' %}OCP{% else %}{{ device.phase|default('idle')|replace('_', ' ')|title }}{% endif %}</h2></div>
+    <p>All times shown in SAST · UTC+02:00</p>
+  </div>
+  <div class="countdown-grid">
+    <article><span>Handoff delay</span><strong data-field="handoff">Not active</strong><small data-field="handoffConfigured">{{ device.handoff_seconds|default(0) }} s configured</small></article>
+    <article><span>OCP period</span><strong data-field="ocp">Not active</strong><small data-field="ocpConfigured">{{ device.ocp_seconds|default(0) }} s configured</small></article>
+    <article><span>Run elapsed</span><strong data-field="elapsed">0 s</strong><small>Measured from OCP start</small></article>
+    <article><span>First light ON</span><strong data-field="firstLight">{% if device.first_light_at %}{{ device.first_light_at|local_time(status.timezone) }}{% else %}—{% endif %}</strong><small>Commanded transition</small></article>
+  </div>
+  <p class="command-disclaimer">Commanded relay state is reported; electrical and optical output are not independently verified.</p>
 </section>
 
 <section class="section-heading"><div><p class="eyebrow">Recent state</p><h2>Timeline</h2></div>{% if request.state.identity.can_operate %}<a class="text-link" href="/schedules/new?device={{ device.id }}">Schedule this device →</a>{% endif %}</section>

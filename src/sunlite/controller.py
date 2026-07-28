@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -15,8 +15,10 @@ from .domain import (
     AuditEvent,
     CommandedState,
     CommandRecord,
+    CustomSchedule,
     DeviceMode,
     DeviceRuntime,
+    OnDemandSchedule,
     RecoveryAction,
     RunRecord,
     Schedule,
@@ -25,11 +27,18 @@ from .gpio import GpioZeroRelay
 from .relay import RecordingRelay, RelayDriver
 from .scheduling import (
     find_conflicts,
+    pattern_start,
+    phase_at,
+    phase_deadline,
     preview,
+    preview_on_demand,
     recovery_action,
+    run_start,
     schedule_end,
+    shifted_on_demand_steps,
     state_at,
     transitions_between,
+    validate_definition,
 )
 from .storage import Repository
 
@@ -133,9 +142,16 @@ class ControllerService:
         schedules = schedules if schedules is not None else self.repository.list_schedules()
         names = {device.id: device.name for device in self.config.devices}
         schedule_names = {schedule.id: schedule.name for schedule in schedules}
+        schedule_map = {schedule.id: schedule for schedule in schedules}
         devices: list[JsonObject] = []
         for device_id, runtime in self.arbiter.devices.items():
             next_transition = self._next_device_transition(device_id, schedules, now)
+            active_schedule = (
+                schedule_map.get(runtime.active_schedule_id)
+                if runtime.active_schedule_id
+                else None
+            )
+            phase = phase_at(active_schedule, now) if active_schedule else None
             devices.append(
                 {
                     "id": device_id,
@@ -151,6 +167,36 @@ class ControllerService:
                     ),
                     "updated_at": runtime.updated_at.isoformat(),
                     "next_transition": next_transition,
+                    "phase": phase or "idle",
+                    "phase_ends_at": (
+                        deadline.isoformat()
+                        if active_schedule
+                        and (deadline := phase_deadline(active_schedule, now))
+                        else None
+                    ),
+                    "handoff_seconds": (
+                        active_schedule.handoff_delay.total_seconds()
+                        if active_schedule
+                        else 0
+                    ),
+                    "ocp_seconds": (
+                        active_schedule.ocp_duration.total_seconds()
+                        if active_schedule
+                        else 0
+                    ),
+                    "run_started_at": (
+                        run_start(active_schedule).isoformat() if active_schedule else None
+                    ),
+                    "first_light_at": (
+                        pattern_start(active_schedule).isoformat()
+                        if active_schedule
+                        else None
+                    ),
+                    "run_elapsed_seconds": (
+                        max(0.0, (now - run_start(active_schedule)).total_seconds())
+                        if active_schedule and now >= run_start(active_schedule)
+                        else 0
+                    ),
                 }
             )
         return {
@@ -169,16 +215,43 @@ class ControllerService:
         if action == "status":
             return self.reconcile(now)
         if action == "schedules.list":
-            return [schedule_to_dict(item) for item in self.repository.list_schedules()]
+            definitions = (
+                *self.repository.list_on_demand(),
+                *self.repository.list_scheduled_definitions(),
+            )
+            return [schedule_to_dict(item) for item in definitions]
         if action == "schedules.get":
-            schedule = self.repository.get_schedule(str(request.get("id", "")))
+            schedule_id = str(request.get("id", ""))
+            schedule = self.repository.get_on_demand(
+                schedule_id
+            ) or self.repository.get_schedule(schedule_id)
             if schedule is None:
                 raise KeyError("schedule not found")
             return schedule_to_dict(schedule)
         if action == "schedules.preview":
             schedule = schedule_from_dict(_object(request, "schedule"))
+            validate_definition(schedule)
+            if isinstance(schedule, OnDemandSchedule):
+                return [
+                    {
+                        "run_seconds": item.run_time.total_seconds(),
+                        "state": item.state.value,
+                        "phase": item.phase,
+                    }
+                    for item in preview_on_demand(schedule)
+                ]
             return [
-                {"at": item.at.isoformat(), "state": item.state.value} for item in preview(schedule)
+                {
+                    "at": item.at.isoformat(),
+                    "run_seconds": (
+                        max(0.0, (item.at - run_start(schedule)).total_seconds())
+                        if item.at >= run_start(schedule)
+                        else None
+                    ),
+                    "state": item.state.value,
+                    "phase": item.phase,
+                }
+                for item in preview(schedule)
             ]
         if action == "history":
             return self._history()
@@ -193,15 +266,79 @@ class ControllerService:
             return self.reconcile(now)
         if action == "schedules.save":
             schedule = schedule_from_dict(_object(request, "schedule"))
-            others = tuple(
-                item for item in self.repository.list_schedules() if item.id != schedule.id
-            )
-            conflicts = find_conflicts((*others, schedule))
-            if conflicts:
-                raise ValueError("schedule conflicts with another enabled schedule for this device")
-            self.repository.save_schedule(schedule)
+            validate_definition(schedule)
+            if isinstance(schedule, OnDemandSchedule):
+                if self.repository.get_schedule(schedule.id):
+                    raise ValueError("schedule id is already used by a future schedule")
+                self.repository.save_on_demand(schedule)
+            else:
+                if self.repository.get_on_demand(schedule.id):
+                    raise ValueError("schedule id is already used by an on-demand run")
+                others = tuple(
+                    item for item in self.repository.list_schedules() if item.id != schedule.id
+                )
+                conflicts = find_conflicts((*others, schedule))
+                if conflicts:
+                    raise ValueError(
+                        "schedule conflicts with another enabled schedule for this device"
+                    )
+                self.repository.save_schedule(schedule)
         elif action == "schedules.delete":
-            self.repository.archive_schedule(str(request.get("id", "")))
+            self.repository.archive_definition(str(request.get("id", "")))
+        elif action == "schedules.launch":
+            schedule_id = _text(request, "id")
+            definition = self.repository.get_on_demand(schedule_id)
+            if definition is None or not definition.enabled:
+                raise KeyError("on-demand schedule not found or disabled")
+            runtime = self.arbiter.devices.get(definition.device_id)
+            if runtime is None:
+                raise KeyError(f"unknown device: {definition.device_id}")
+            if (
+                self.arbiter.global_stop_latched
+                or runtime.stop_latched
+                or runtime.paused
+                or runtime.fault
+            ):
+                raise ValueError(
+                    "run cannot launch while the device is stopped, paused, or faulted"
+                )
+            handoff = timedelta(
+                seconds=float(
+                    request.get(
+                        "handoff_seconds", definition.handoff_delay.total_seconds()
+                    )
+                )
+            )
+            ocp = timedelta(
+                seconds=float(request.get("ocp_seconds", definition.ocp_duration.total_seconds()))
+            )
+            steps = shifted_on_demand_steps(definition, ocp)
+            instance = CustomSchedule(
+                id=f"{definition.id}:launch:{command_id}",
+                device_id=definition.device_id,
+                name=definition.name,
+                starts_at=now,
+                timezone=definition.timezone,
+                steps=steps,
+                recovery_policy=definition.recovery_policy,
+                enabled=True,
+                handoff_delay=handoff,
+                ocp_duration=ocp,
+            )
+            conflicts = find_conflicts(
+                (
+                    *(
+                        item
+                        for item in self.repository.list_schedules()
+                        if item.id != instance.id
+                    ),
+                    instance,
+                )
+            )
+            if conflicts:
+                raise ValueError("run conflicts with another enabled schedule for this device")
+            self.repository.save_schedule(instance, source_template_id=definition.id)
+            request["device_id"] = definition.device_id
         elif action == "stop_all":
             self._abort_active_schedules(None, "stopped", now)
             self.arbiter.stop_all(now)
@@ -212,13 +349,19 @@ class ControllerService:
             self._abort_active_schedules(device_id, "stopped", now)
             self.arbiter.stop_device(device_id, now)
         elif action == "device.pause":
-            self.arbiter.pause_device(_text(request, "device_id"), now)
+            device_id = _text(request, "device_id")
+            self._reject_during_preparation(device_id, now, "pause")
+            self.arbiter.pause_device(device_id, now)
         elif action == "device.resume":
             self.arbiter.resume_device(_text(request, "device_id"))
         elif action == "device.manual":
+            device_id = _text(request, "device_id")
+            requested_state = CommandedState(_text(request, "state"))
+            if requested_state is CommandedState.ON:
+                self._reject_during_preparation(device_id, now, "manual ON")
             self.arbiter.set_manual_override(
-                _text(request, "device_id"),
-                CommandedState(_text(request, "state")),
+                device_id,
+                requested_state,
                 timedelta(seconds=float(request.get("duration_seconds", 0))),
                 _text(request, "reason"),
                 now,
@@ -229,8 +372,21 @@ class ControllerService:
             raise ValueError(f"unknown action: {action}")
 
         self._record_command(command_id, action, request, actor, now)
+        details = ""
+        if action == "schedules.launch":
+            details = (
+                f"schedule={request.get('id')};"
+                f"handoff_seconds={request.get('handoff_seconds')};"
+                f"ocp_seconds={request.get('ocp_seconds')}"
+            )
         self.repository.record_audit(
-            AuditEvent(now, actor, action, str(request.get("device_id") or "") or None)
+            AuditEvent(
+                now,
+                actor,
+                action,
+                str(request.get("device_id") or "") or None,
+                details,
+            )
         )
         result = self.reconcile(now)
         self._wake.set()
@@ -265,14 +421,7 @@ class ControllerService:
             if action is RecoveryAction.ABORT:
                 self.repository.set_schedule_enabled(schedule.id, False)
                 self.repository.save_run(
-                    RunRecord(
-                        self._run_id(schedule),
-                        schedule.id,
-                        schedule.device_id,
-                        schedule.starts_at,
-                        actual_end=now,
-                        outcome="interrupted",
-                    )
+                    self._run_record(schedule, "interrupted", actual_end=now)
                 )
                 self.repository.record_audit(
                     AuditEvent(now, "controller", "run_interrupted_on_restart", schedule.device_id)
@@ -292,14 +441,7 @@ class ControllerService:
                 continue
             self.repository.set_schedule_enabled(schedule.id, False)
             self.repository.save_run(
-                RunRecord(
-                    self._run_id(schedule),
-                    schedule.id,
-                    schedule.device_id,
-                    schedule.starts_at,
-                    actual_end=now,
-                    outcome=outcome,
-                )
+                self._run_record(schedule, outcome, actual_end=now)
             )
             self._active_runs.pop(schedule.device_id, None)
 
@@ -323,27 +465,15 @@ class ControllerService:
             if previous:
                 outcome = "completed" if now >= schedule_end(previous) else "interrupted"
                 self.repository.save_run(
-                    RunRecord(
-                        self._run_id(previous),
-                        previous.id,
-                        device_id,
-                        previous.starts_at,
-                        actual_end=now,
-                        outcome=outcome,
-                    )
+                    self._run_record(previous, outcome, actual_end=now)
                 )
             self._active_runs.pop(device_id, None)
         if active_schedule_id and active_schedule_id != previous_id:
             schedule = schedules[active_schedule_id]
+            if now < run_start(schedule):
+                return
             self.repository.save_run(
-                RunRecord(
-                    self._run_id(schedule),
-                    schedule.id,
-                    device_id,
-                    schedule.starts_at,
-                    actual_start=now,
-                    outcome="running",
-                )
+                self._run_record(schedule, "running", actual_start=now)
             )
             self._active_runs[device_id] = active_schedule_id
 
@@ -360,7 +490,11 @@ class ControllerService:
         if not candidates:
             return None
         item = min(candidates, key=lambda transition: transition.at)
-        return {"at": item.at.isoformat(), "state": item.state.value}
+        return {
+            "at": item.at.isoformat(),
+            "state": item.state.value,
+            "phase": item.phase,
+        }
 
     def _history(self) -> JsonObject:
         return {
@@ -373,6 +507,12 @@ class ControllerService:
                     "actual_start": run.actual_start.isoformat() if run.actual_start else None,
                     "actual_end": run.actual_end.isoformat() if run.actual_end else None,
                     "outcome": run.outcome,
+                    "source_schedule_id": run.source_schedule_id,
+                    "handoff_seconds": run.handoff_delay.total_seconds(),
+                    "ocp_seconds": run.ocp_duration.total_seconds(),
+                    "first_light_at": (
+                        run.first_light_at.isoformat() if run.first_light_at else None
+                    ),
                 }
                 for run in self.repository.list_runs()
             ],
@@ -436,8 +576,45 @@ class ControllerService:
 
     @staticmethod
     def _run_id(schedule: Schedule) -> str:
-        stamp = int(schedule.starts_at.astimezone(UTC).timestamp())
+        stamp = int(run_start(schedule).timestamp())
         return f"{schedule.id}:{stamp}"
+
+    def _run_record(
+        self,
+        schedule: Schedule,
+        outcome: str,
+        *,
+        actual_start: datetime | None = None,
+        actual_end: datetime | None = None,
+    ) -> RunRecord:
+        return RunRecord(
+            id=self._run_id(schedule),
+            schedule_id=schedule.id,
+            device_id=schedule.device_id,
+            planned_start=run_start(schedule),
+            actual_start=actual_start,
+            actual_end=actual_end,
+            outcome=outcome,
+            source_schedule_id=self.repository.source_template_id(schedule.id),
+            handoff_delay=schedule.handoff_delay,
+            ocp_duration=schedule.ocp_duration,
+            first_light_at=pattern_start(schedule),
+        )
+
+    def _reject_during_preparation(
+        self, device_id: str, now: datetime, action: str
+    ) -> None:
+        schedule = next(
+            (
+                item
+                for item in self.repository.list_schedules()
+                if item.device_id == device_id
+                and phase_at(item, now) in {"handoff", "ocp"}
+            ),
+            None,
+        )
+        if schedule:
+            raise ValueError(f"{action} is unavailable during handoff delay or OCP")
 
     @staticmethod
     def _runtime_signature(runtime: DeviceRuntime) -> tuple[object, ...]:

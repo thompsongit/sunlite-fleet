@@ -6,9 +6,10 @@ from typing import Any
 from .domain import (
     CommandedState,
     CustomSchedule,
+    OnDemandSchedule,
     RecoveryPolicy,
     RegularSchedule,
-    Schedule,
+    ScheduleDefinition,
     ScheduleKind,
     ScheduleStep,
     require_aware,
@@ -17,17 +18,20 @@ from .domain import (
 JsonObject = dict[str, Any]
 
 
-def schedule_to_dict(schedule: Schedule) -> JsonObject:
+def schedule_to_dict(schedule: ScheduleDefinition) -> JsonObject:
     result: JsonObject = {
         "id": schedule.id,
         "device_id": schedule.device_id,
         "name": schedule.name,
         "kind": schedule.kind.value,
-        "starts_at": schedule.starts_at.isoformat(),
         "timezone": schedule.timezone,
         "recovery_policy": schedule.recovery_policy.value,
         "enabled": schedule.enabled,
+        "handoff_seconds": schedule.handoff_delay.total_seconds(),
+        "ocp_seconds": schedule.ocp_duration.total_seconds(),
     }
+    if not isinstance(schedule, OnDemandSchedule):
+        result["starts_at"] = schedule.starts_at.isoformat()
     if isinstance(schedule, RegularSchedule):
         result.update(
             {
@@ -45,17 +49,33 @@ def schedule_to_dict(schedule: Schedule) -> JsonObject:
     return result
 
 
-def schedule_from_dict(data: JsonObject) -> Schedule:
-    starts_at = _datetime(data, "starts_at")
+def schedule_from_dict(data: JsonObject) -> ScheduleDefinition:
     schedule_id = _text(data, "id")
     device_id = _text(data, "device_id")
     name = _text(data, "name")
     timezone = _text(data, "timezone")
+    kind = ScheduleKind(_text(data, "kind"))
     recovery_policy = RecoveryPolicy(
         str(data.get("recovery_policy", RecoveryPolicy.ABORT_IF_INTERRUPTED.value))
     )
     enabled = bool(data.get("enabled", True))
-    if ScheduleKind(_text(data, "kind")) is ScheduleKind.REGULAR:
+    handoff_delay = timedelta(seconds=_optional_number(data, "handoff_seconds"))
+    ocp_duration = timedelta(seconds=_optional_number(data, "ocp_seconds"))
+    if kind is ScheduleKind.ON_DEMAND:
+        return OnDemandSchedule(
+            id=schedule_id,
+            device_id=device_id,
+            name=name,
+            timezone=timezone,
+            steps=_steps(data),
+            recovery_policy=recovery_policy,
+            enabled=enabled,
+            handoff_delay=handoff_delay,
+            ocp_duration=ocp_duration,
+        )
+
+    starts_at = _datetime(data, "starts_at")
+    if kind is ScheduleKind.REGULAR:
         ends_at = data.get("ends_at")
         return RegularSchedule(
             id=schedule_id,
@@ -73,26 +93,20 @@ def schedule_from_dict(data: JsonObject) -> Schedule:
             ),
             recovery_policy=recovery_policy,
             enabled=enabled,
+            handoff_delay=handoff_delay,
+            ocp_duration=ocp_duration,
         )
-    raw_steps = data.get("steps")
-    if not isinstance(raw_steps, list):
-        raise ValueError("steps must be a list")
     return CustomSchedule(
         id=schedule_id,
         device_id=device_id,
         name=name,
         starts_at=starts_at,
         timezone=timezone,
-        steps=tuple(
-            ScheduleStep(
-                timedelta(seconds=float(step["offset_seconds"])),
-                CommandedState(str(step["state"])),
-            )
-            for step in raw_steps
-            if isinstance(step, dict)
-        ),
+        steps=_steps(data),
         recovery_policy=recovery_policy,
         enabled=enabled,
+        handoff_delay=handoff_delay,
+        ocp_duration=ocp_duration,
     )
 
 
@@ -108,6 +122,27 @@ def _number(data: JsonObject, key: str) -> float:
     if not isinstance(value, int | float):
         raise ValueError(f"{key} must be numeric")
     return float(value)
+
+
+def _optional_number(data: JsonObject, key: str) -> float:
+    value = data.get(key, 0)
+    if not isinstance(value, int | float):
+        raise ValueError(f"{key} must be numeric")
+    return float(value)
+
+
+def _steps(data: JsonObject) -> tuple[ScheduleStep, ...]:
+    raw_steps = data.get("steps")
+    if not isinstance(raw_steps, list):
+        raise ValueError("steps must be a list")
+    return tuple(
+        ScheduleStep(
+            timedelta(seconds=float(step["offset_seconds"])),
+            CommandedState(str(step["state"])),
+        )
+        for step in raw_steps
+        if isinstance(step, dict)
+    )
 
 
 def _datetime(data: JsonObject, key: str) -> datetime:
