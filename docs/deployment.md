@@ -33,7 +33,7 @@ sudoedit /etc/sunlite-scheduler/config.toml
 sudoedit /etc/sunlite-scheduler/web.env
 ```
 
-Set the actual BCM pins, relay polarity, devices, web bind address, and port. The generated session secret should remain private. The default `0.0.0.0:8000` bind is reachable through the Pi's Wi-Fi, LAN, and Tailscale addresses.
+Set the actual BCM pins, relay polarity, devices, web bind address, and port. The generated session secret should remain private. The default `0.0.0.0:8000` bind is reachable through the Pi's Wi-Fi, LAN, and Tailscale addresses. Set `SUNLITE_WEB_PORT=80` to use `http://PI_ADDRESS` without a port suffix; the web service has only the capability required to bind a privileged port.
 
 Validate without starting GPIO control:
 
