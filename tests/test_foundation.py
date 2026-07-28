@@ -30,6 +30,9 @@ def test_systemd_units_use_supported_path_conditions() -> None:
         text = (unit_root / unit).read_text()
         assert "ConditionPathIsReadable" not in text
         assert "ConditionPathExists=" in text
+    web_unit = (unit_root / "sunlite-web.service").read_text()
+    assert "AmbientCapabilities=CAP_NET_BIND_SERVICE" in web_unit
+    assert "CapabilityBoundingSet=CAP_NET_BIND_SERVICE" in web_unit
 
 
 def test_config_clock_and_recording_relay() -> None:
