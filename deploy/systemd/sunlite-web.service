@@ -3,7 +3,7 @@ Description=Sunlite Scheduler web interface
 Documentation=file:/opt/sunlite-scheduler/current/docs/deployment.md
 After=network-online.target sunlite-controller.service
 Wants=network-online.target
-ConditionPathIsReadable=/etc/sunlite-scheduler/web.env
+ConditionPathExists=/etc/sunlite-scheduler/web.env
 StartLimitIntervalSec=60
 StartLimitBurst=5
 
