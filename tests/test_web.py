@@ -36,18 +36,44 @@ class FakeGateway:
                             "at": "2026-07-12T08:10:00+00:00",
                             "state": "off",
                         },
+                        "phase": "running",
+                        "handoff_seconds": 4,
+                        "ocp_seconds": 60,
+                        "run_elapsed_seconds": 70,
+                        "first_light_at": "2026-07-12T08:01:04+00:00",
                     }
                 ],
             }
         if action == "schedules.list":
-            return []
+            return [
+                {
+                    "id": "ready-a",
+                    "device_id": "sunlite-a",
+                    "name": "Ready run",
+                    "kind": "on_demand",
+                    "timezone": "Africa/Johannesburg",
+                    "recovery_policy": "abort_if_interrupted",
+                    "enabled": True,
+                    "handoff_seconds": 4,
+                    "ocp_seconds": 60,
+                    "steps": [
+                        {"offset_seconds": 60, "state": "on"},
+                        {"offset_seconds": 75, "state": "off"},
+                    ],
+                }
+            ]
         if action == "history":
             return {"runs": [], "audit": []}
         if action == "system":
             return {"controller": "healthy", "devices": [], "channels": []}
         if action == "schedules.preview":
+            if payload["schedule"]["kind"] == "on_demand":
+                return [
+                    {"run_seconds": 0, "state": "off", "phase": "ocp"},
+                    {"run_seconds": 60, "state": "on", "phase": "pattern"},
+                ]
             return [{"at": "2026-07-12T08:00:00+00:00", "state": "on"}]
-        if action in {"schedules.save", "schedules.delete"}:
+        if action in {"schedules.save", "schedules.delete", "schedules.launch"}:
             return {"healthy": True, "devices": []}
         raise RuntimeError(f"unsupported fake action: {action}")
 
@@ -67,6 +93,7 @@ def test_fleet_pages_render() -> None:
     dashboard = client.get("/")
     assert dashboard.status_code == 200
     assert "Sunlite 11002 - A" in dashboard.text
+    assert "12 Jul 2026, 10:10:00 SAST" in dashboard.text
     assert "Stop all" in dashboard.text
     assert "✓" in dashboard.text
     assert "HttpOnly" in dashboard.headers["set-cookie"]
@@ -80,11 +107,19 @@ def test_fleet_pages_render() -> None:
     assert 'Raleway, "Open Sans"' in styles
     assert "health-line i" not in styles
     editor = client.get("/schedules/new").text
-    assert "Custom timeline" in editor
+    assert "On-Demand Run" in editor
+    assert editor.index("On-Demand Run") < editor.index("Scheduled Regular Cycle")
+    assert editor.index("Scheduled Regular Cycle") < editor.index(
+        "Scheduled Custom Timeline"
+    )
     assert 'name="schedule-name"' in editor and 'id="schedule-error"' in editor
-    assert editor.count('step="any"') == 2
+    assert "Handoff delay" in editor and "OCP period" in editor
+    assert "Run time is measured from the beginning of the OCP period" in editor
     script = client.get("/static/app.js").text
-    assert "setControlsEnabled" in script and "must end OFF" in script and 'step="any"' in script
+    assert "localInputInZone" in script and "durationLabel" in script
+    assert "Starts after handoff delay" in script
+    schedules = client.get("/schedules").text
+    assert "Launch run" in schedules and "Begin launch countdown" in schedules
 
 
 def test_web_commands_and_preview_use_gateway() -> None:
@@ -114,7 +149,7 @@ def test_web_commands_and_preview_use_gateway() -> None:
             "device_id": "sunlite-a",
             "name": "Cycle",
             "kind": "regular",
-            "starts_at": "2026-07-12T08:00:00+00:00",
+            "starts_at_local": "2026-07-12T10:00:00",
             "timezone": "Africa/Johannesburg",
             "on_seconds": 60,
             "off_seconds": 60,
@@ -122,3 +157,35 @@ def test_web_commands_and_preview_use_gateway() -> None:
         },
     )
     assert preview.json()[0]["state"] == "on"
+    assert gateway.requests[-1]["schedule"]["starts_at"] == "2026-07-12T08:00:00+00:00"
+
+    relative = client.post(
+        "/api/schedules/preview",
+        headers=headers,
+        json={
+            "id": "ready-a",
+            "device_id": "sunlite-a",
+            "name": "Ready",
+            "kind": "on_demand",
+            "timezone": "Africa/Johannesburg",
+            "handoff_seconds": 4,
+            "ocp_seconds": 60,
+            "steps": [
+                {"offset_seconds": 60, "state": "on"},
+                {"offset_seconds": 75, "state": "off"},
+            ],
+        },
+    )
+    assert relative.json()[1] == {
+        "run_seconds": 60,
+        "state": "on",
+        "phase": "pattern",
+    }
+
+    launched = client.post(
+        "/api/schedules/ready-a/launch",
+        headers=headers,
+        json={"handoff_seconds": 4, "ocp_seconds": 60},
+    )
+    assert launched.status_code == 200
+    assert gateway.requests[-1]["action"] == "schedules.launch"

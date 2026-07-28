@@ -24,6 +24,7 @@ class RecoveryPolicy(StrEnum):
 class ScheduleKind(StrEnum):
     REGULAR = "regular"
     CUSTOM = "custom"
+    ON_DEMAND = "on_demand"
 
 
 class DeviceMode(StrEnum):
@@ -73,6 +74,8 @@ class RegularSchedule:
     ends_at: datetime | None = None
     recovery_policy: RecoveryPolicy = RecoveryPolicy.ABORT_IF_INTERRUPTED
     enabled: bool = True
+    handoff_delay: timedelta = timedelta()
+    ocp_duration: timedelta = timedelta()
     kind: ScheduleKind = field(default=ScheduleKind.REGULAR, init=False)
 
 
@@ -86,10 +89,29 @@ class CustomSchedule:
     steps: tuple[ScheduleStep, ...]
     recovery_policy: RecoveryPolicy = RecoveryPolicy.ABORT_IF_INTERRUPTED
     enabled: bool = True
+    handoff_delay: timedelta = timedelta()
+    ocp_duration: timedelta = timedelta()
     kind: ScheduleKind = field(default=ScheduleKind.CUSTOM, init=False)
 
 
 Schedule = RegularSchedule | CustomSchedule
+
+
+@dataclass(frozen=True, slots=True)
+class OnDemandSchedule:
+    id: str
+    device_id: str
+    name: str
+    timezone: str
+    steps: tuple[ScheduleStep, ...]
+    recovery_policy: RecoveryPolicy = RecoveryPolicy.ABORT_IF_INTERRUPTED
+    enabled: bool = True
+    handoff_delay: timedelta = timedelta()
+    ocp_duration: timedelta = timedelta()
+    kind: ScheduleKind = field(default=ScheduleKind.ON_DEMAND, init=False)
+
+
+ScheduleDefinition = Schedule | OnDemandSchedule
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +120,16 @@ class Transition:
     device_id: str
     at: datetime
     state: CommandedState
+    phase: str = "pattern"
+
+
+@dataclass(frozen=True, slots=True)
+class RelativeTransition:
+    schedule_id: str
+    device_id: str
+    run_time: timedelta
+    state: CommandedState
+    phase: str = "pattern"
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,3 +189,7 @@ class RunRecord:
     actual_start: datetime | None = None
     actual_end: datetime | None = None
     outcome: str = "planned"
+    source_schedule_id: str | None = None
+    handoff_delay: timedelta = timedelta()
+    ocp_duration: timedelta = timedelta()
+    first_light_at: datetime | None = None
