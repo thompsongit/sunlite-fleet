@@ -24,6 +24,14 @@ from sunlite.storage import Repository
 NOW = datetime(2026, 7, 12, 8, tzinfo=UTC)
 
 
+def test_systemd_units_use_supported_path_conditions() -> None:
+    unit_root = Path(__file__).parents[1] / "deploy" / "systemd"
+    for unit in ("sunlite-controller.service", "sunlite-web.service"):
+        text = (unit_root / unit).read_text()
+        assert "ConditionPathIsReadable" not in text
+        assert "ConditionPathExists=" in text
+
+
 def test_config_clock_and_recording_relay() -> None:
     config = load_config(Path(__file__).parents[1] / "config.example.toml")
     assert [device.name for device in config.devices] == [

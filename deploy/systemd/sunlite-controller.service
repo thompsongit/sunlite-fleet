@@ -2,7 +2,7 @@
 Description=Sunlite relay controller
 Documentation=file:/opt/sunlite-scheduler/current/docs/deployment.md
 After=local-fs.target
-ConditionPathIsReadable=/etc/sunlite-scheduler/config.toml
+ConditionPathExists=/etc/sunlite-scheduler/config.toml
 StartLimitIntervalSec=60
 StartLimitBurst=5
 
